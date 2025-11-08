@@ -15,7 +15,7 @@ services:
       context: .
       dockerfile: ./agents/orchestrator/Dockerfile
     ports:
-      - "8001"
+      - "8001:8001"
     environment:
       - TEXT_AGENT_URL=http://text-agent:8002
     depends_on:
@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: ./agents/text-agent/Dockerfile
     expose:
-      - "8002"
+      - "8002:8002"
 
 networks:
   default:
