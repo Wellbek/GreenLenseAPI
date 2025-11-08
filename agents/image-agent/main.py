@@ -33,7 +33,12 @@ async def analyze_image_url(payload: ImageUrlRequest):
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail="Image URL is not accessible.")
     except Exception:
-        raise HTTPException(status_code=400, detail="Image URL is not accessible or invalid.")
+        print("Image URL is not accessible or invalid.") # print error but don't crash, can just ignore
+        return {
+            "ocr_text": [],
+            "detected_objects": [],
+            "caption": "Image not found - Ignore"
+        } 
 
     try:
         # Use Read API for OCR
