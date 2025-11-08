@@ -14,6 +14,7 @@ app = FastAPI(title="Orchestrator Agent", version="1.0.0")
 TEXT_AGENT_URL = os.getenv("TEXT_AGENT_URL", "http://text-agent:8002")
 IMAGE_AGENT_URL = os.getenv("IMAGE_AGENT_URL", "http://image-agent:8003")
 SCRAPE_AGENT_URL = os.getenv("SCRAPE_AGENT_URL", "http://scrape-agent:8004")
+ALLERGEN_AGENT_URL = os.getenv("ALLERGEN_AGENT_URL", "http://allergen-agent:8005")
 
 # Initialize Azure OpenAI client
 client = AzureOpenAI(
@@ -25,6 +26,9 @@ client = AzureOpenAI(
 # Request/Response models
 class UrlRequest(BaseModel):
     url: str
+
+class TextileDescriptionRequest(BaseModel):
+    description: str
 
 class ProductInfo(BaseModel):
     images: List[str] = []
@@ -73,16 +77,15 @@ class OrchestrationContext(BaseModel):
     product_info: Optional[ProductInfo] = None
     text_analysis: Optional[ProductTextResponse] = None
     image_analyses: List[Dict[str, Any]] = []
+    allergen_analysis: Optional[Dict[str, Any]] = None
     rounds_completed: int = 0
     data_sources: List[str] = []
-    confidences: Dict[str, float] = {}
     is_mock: bool = False
     current_scores: Optional[ProductScoreResponse] = None
 
 # Configuration
 MAX_ROUNDS = 3
-MIN_CONFIDENCE_THRESHOLD = 0.70
-MIN_OVERALL_CONFIDENCE = 0.60
+MIN_CONFIDENCE_THRESHOLD = 0.65
 
 @app.get("/health")
 async def health_check():
@@ -255,11 +258,32 @@ async def analyze_images(context: OrchestrationContext):
                 context.image_analyses.append(result)
                 context.data_sources.append("image_analysis")
 
+async def call_allergen_agent(context: OrchestrationContext):
+    """Call allergen agent to analyze materials for allergens"""
+    try:
+        if not context.text_analysis or not context.text_analysis.materials:
+            return
+        
+        # Build simple description from materials
+        description = ", ".join(context.text_analysis.materials)
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{ALLERGEN_AGENT_URL}/analyze/textile",
+                json={"description": description}
+            )
+            response.raise_for_status()
+            context.allergen_analysis = response.json()
+            context.data_sources.append("allergen_agent_analysis")
+            
+    except Exception as e:
+        print(f"Allergen agent call failed: {e}")
+
 async def perform_confidence_based_analysis(context: OrchestrationContext):
-    """Perform targeted analysis based on current confidence scores and available data"""
+    """Perform targeted analysis based on current confidence scores"""
     tasks = []
     
-    # Check if we need more image analysis (if confidence is low and we have more images)
+    # Check if we need more image analysis
     if (context.current_scores.overall_confidence < MIN_CONFIDENCE_THRESHOLD and
         context.product_info and 
         len(context.product_info.images) > len(context.image_analyses)):
@@ -284,48 +308,15 @@ async def perform_confidence_based_analysis(context: OrchestrationContext):
         
         tasks.append(analyze_additional_images())
     
-    # Check if individual metric confidence scores are low and we can improve them
-    if (hasattr(context.current_scores, 'durability_confidence') and 
-        context.current_scores.durability_confidence < MIN_CONFIDENCE_THRESHOLD and
-        context.text_analysis and context.text_analysis.brand):
+    # Call allergen agent if confidence is low and we have materials
+    if (context.current_scores.allergen_confidence < MIN_CONFIDENCE_THRESHOLD and
+        context.text_analysis and 
+        context.text_analysis.materials and
+        not context.allergen_analysis):
         
-        async def brand_durability_research():
-            context.data_sources.append("brand_durability_research")
-            context.confidences["brand_durability"] = 0.85
-        
-        tasks.append(brand_durability_research())
+        tasks.append(call_allergen_agent(context))
     
-    if (hasattr(context.current_scores, 'quality_confidence') and
-        context.current_scores.quality_confidence < MIN_CONFIDENCE_THRESHOLD and
-        context.text_analysis and context.text_analysis.manufacturing_details):
-        
-        async def manufacturing_quality_verification():
-            context.data_sources.append("manufacturing_quality_verification")
-            context.confidences["manufacturing_quality"] = 0.9
-        
-        tasks.append(manufacturing_quality_verification())
-    
-    if (hasattr(context.current_scores, 'sustainability_confidence') and
-        context.current_scores.sustainability_confidence < MIN_CONFIDENCE_THRESHOLD and
-        context.text_analysis and context.text_analysis.materials):
-        
-        async def materials_sustainability_research():
-            context.data_sources.append("materials_sustainability_research")
-            context.confidences["materials_sustainability"] = 0.8
-        
-        tasks.append(materials_sustainability_research())
-    
-    if (hasattr(context.current_scores, 'allergen_confidence') and
-        context.current_scores.allergen_confidence < MIN_CONFIDENCE_THRESHOLD and
-        context.text_analysis and context.text_analysis.materials):
-        
-        async def allergen_deep_analysis():
-            context.data_sources.append("allergen_deep_analysis")
-            context.confidences["allergen_analysis"] = 0.90
-        
-        tasks.append(allergen_deep_analysis())
-    
-    # Execute all targeted analysis tasks in parallel
+    # Execute all tasks in parallel
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -345,15 +336,20 @@ async def generate_current_scores(context: OrchestrationContext) -> ProductScore
         "name": context.text_analysis.name if context.text_analysis else "Unknown",
         "image_analyses": context.image_analyses,
         "data_sources": context.data_sources,
-        "rounds_completed": context.rounds_completed,
-        "additional_confidences": context.confidences
+        "rounds_completed": context.rounds_completed
     }
+    
+    # Include allergen analysis if available
+    if context.allergen_analysis:
+        product_data["allergen_analysis"] = context.allergen_analysis
 
     prompt = f"""
-    Analyze this product data and provide detailed scoring with confidence levels. Focus on assessing confidence based on data completeness and quality:
+    Analyze this product data and provide detailed scoring with confidence levels:
 
     Product Data:
     {json.dumps(product_data, indent=2)}
+
+    If allergen_analysis is present, use it to assess allergen risk and confidence.
 
     Provide a detailed analysis and scoring in the following JSON format:
     {{
@@ -365,9 +361,9 @@ async def generate_current_scores(context: OrchestrationContext) -> ProductScore
         "quality_confidence": 0.0-1.0,
         "sustainability_score": 0.0-5.0,
         "sustainability_confidence": 0.0-1.0,
-        "explanation": ["detailed explanations for each score always linked to references from data sources when available, stating explicitely what things let to this score. You never need to explicitely state the score or confidence number here."],
+        "explanation": ["detailed explanations for each score linked to data sources"],
         "overall_confidence": 0.0-1.0,
-        "total_items_identified": <count of all identified items across all categories>,
+        "total_items_identified": <count of all identified items>,
         "product_summary": {{
             "name": "product name",
             "brand": "product brand",
@@ -381,21 +377,17 @@ async def generate_current_scores(context: OrchestrationContext) -> ProductScore
         }}
     }}
 
-    For total_items_identified, count all non-empty items found across: materials, durability_indicators, allergen_warnings, potential_risks, safety_information, manufacturing_details lists, plus name, brand, and category if they are not "Unknown".
-
     Confidence scoring guidelines:
-    - High confidence (0.8-1.0): Comprehensive data from multiple sources or certified sources
+    - High confidence (0.8-1.0): Comprehensive data from multiple sources
     - Medium confidence (0.5-0.79): Adequate data but some gaps
-    - Low confidence (0.0-0.49): Limited data, requires more analysis
-
-    Base confidence on data availability, source reliability, and completeness of information for each metric.
+    - Low confidence (0.0-0.49): Limited data
     """
 
     try:
         response = client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
             messages=[
-                {"role": "system", "content": "You are an expert product quality assessor. Focus on providing accurate confidence scores based on data completeness and quality. Return only valid JSON."},
+                {"role": "system", "content": "You are an expert product quality assessor. Return only valid JSON."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
@@ -404,19 +396,17 @@ async def generate_current_scores(context: OrchestrationContext) -> ProductScore
         
         response_content = response.choices[0].message.content.strip()
         
-        # Clean up response if it contains markdown formatting
-        if response_content.startswith(''):
+        # Clean up response
+        if response_content.startswith('```json'):
             response_content = response_content.split('\n', 1)[1]
-        if response_content.endswith(''):
+        if response_content.endswith('```'):
             response_content = response_content.rsplit('\n', 1)[0]
-        
-        # Remove any "json" prefix if present
         if response_content.startswith('json'):
             response_content = response_content[4:].strip()
             
         result = json.loads(response_content)
         
-        # Ensure images are counted as data sources
+        # Include images in data sources
         final_data_sources = context.data_sources.copy()
         if context.product_info and context.product_info.images:
             final_data_sources.extend(context.product_info.images)
@@ -439,18 +429,17 @@ async def generate_current_scores(context: OrchestrationContext) -> ProductScore
         
     except Exception as e:
         print(f"AI scoring failed: {e}")
-        # Fallback to basic scoring
+        # Fallback scoring
         final_data_sources = context.data_sources.copy()
         if context.product_info and context.product_info.images:
             final_data_sources.extend(context.product_info.images)
         
-        # Calculate fallback total items and summary
         fallback_total = 0
         fallback_summary = {
-            "name": context.text_analysis.name if context.text_analysis and context.text_analysis.name else "Unknown",
-            "brand": context.text_analysis.brand if context.text_analysis and context.text_analysis.brand else "Unknown",
+            "name": context.text_analysis.name if context.text_analysis else "Unknown",
+            "brand": context.text_analysis.brand if context.text_analysis else "Unknown",
             "materials": context.text_analysis.materials if context.text_analysis else [],
-            "category": context.text_analysis.category if context.text_analysis and context.text_analysis.category else "Unknown",
+            "category": context.text_analysis.category if context.text_analysis else "Unknown",
             "durability_indicators": context.text_analysis.durability_indicators if context.text_analysis else [],
             "allergen_warnings": context.text_analysis.allergen_warnings if context.text_analysis else [],
             "potential_risks": context.text_analysis.potential_risks if context.text_analysis else [],
@@ -481,7 +470,7 @@ async def generate_current_scores(context: OrchestrationContext) -> ProductScore
             quality_confidence=0.3,
             sustainability_score=3.0,
             sustainability_confidence=0.3,
-            explanation=["Analysis failed - insufficient data for comprehensive scoring"],
+            explanation=["Analysis failed - insufficient data"],
             overall_confidence=0.3,
             data_sources=list(set(final_data_sources)),
             total_items_identified=fallback_total,
