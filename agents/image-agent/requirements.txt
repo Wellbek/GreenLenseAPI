@@ -1,0 +1,6 @@
+azure-cognitiveservices-vision-computervision
+fastapi
+uvicorn
+python-multipart
+pydantic
+requests

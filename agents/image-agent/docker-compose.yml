@@ -1,0 +1,30 @@
+version: "3.9"
+services:
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - orchestrator
+
+  orchestrator:
+    build: ./orchestrator
+    ports:
+      - "8001:8001"
+    depends_on:
+      - image-agent
+    environment:
+      - IMAGE_AGENT_URL=http://image-agent:8003/analyze
+
+  image-agent:
+    build: ./agents/image-agent
+    ports:
+      - "8003:8003"
+    environment:
+      - VISION_ENDPOINT=${VISION_ENDPOINT}
+      - VISION_KEY=${VISION_KEY}
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
