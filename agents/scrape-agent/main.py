@@ -16,7 +16,7 @@ import re
 
 app = FastAPI(title="Scrape Agent", version="1.0.0")
 
-# Dataset of site-specific CSS classes to limit scraping scope
+# Dataset of site-specific CSS classes to limit scraping scope for improved performance
 SITE_CLASS_FILTERS = {
     "coupang.com": [
         "product-btf-container",
@@ -42,13 +42,9 @@ def get_site_classes(url: str) -> Optional[List[str]]:
     """Get CSS classes to filter for a specific site if URL matches any configured site"""
     parsed_url = urlparse(url)
     domain = parsed_url.netloc.lower()
-    
-    print(domain)
 
     for site_key, classes in SITE_CLASS_FILTERS.items():
-        print(site_key)
         if site_key in domain:
-            print(site_key)
             return classes
     return None
 
@@ -59,15 +55,12 @@ def get_webpage_content(url: str) -> BeautifulSoup:
     }
     
     try:
-        print('1')
         response = requests.get(url, headers=headers, timeout=60)
         response.raise_for_status()
-        print('2')
 
         # Filter by site-specific classes during parsing if available
         site_classes = get_site_classes(url)
         if site_classes:
-            print(site_classes)
             # Parse only elements with specified classes
             strainer = SoupStrainer(class_=lambda x: x and any(cls in x.split() for cls in site_classes))
             soup = BeautifulSoup(response.content, 'html.parser', parse_only=strainer)
@@ -200,8 +193,6 @@ async def health_check():
 async def scrape_product(request: UrlRequest):
     """Scrape product images and raw text content"""
     url = str(request.url)
-    
-    print('0')
 
     # Get webpage content (automatically filtered by site classes if applicable)
     soup = get_webpage_content(url)

@@ -31,9 +31,11 @@ class ProductInfo(BaseModel):
     raw_product_text: str = ""
 
 class ProductFeature(BaseModel):
-    name: str
-    value: str
-    confidence: float = 0.0
+    feature_type: str
+    feature_text: str
+    attributes: Dict[str, Any]
+    char_start: int
+    char_end: int
 
 class ProductTextResponse(BaseModel):
     name: Optional[str] = None
@@ -46,6 +48,7 @@ class ProductTextResponse(BaseModel):
     safety_information: List[str] = []
     manufacturing_details: List[str] = []
     features: List[ProductFeature] = []
+    image_urls: List[str] = []
 
 class ImageUrlRequest(BaseModel):
     image_url: str
@@ -71,6 +74,7 @@ class OrchestrationContext(BaseModel):
     rounds_completed: int = 0
     data_sources: List[str] = []
     confidences: Dict[str, float] = {}
+    is_mock: bool = False
 
 # Configuration
 MAX_ROUNDS = 3
@@ -112,6 +116,36 @@ async def analyze_product(request: UrlRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
+@app.post("/analyze-product-mock", response_model=ProductScoreResponse)
+async def analyze_product_mock(request: UrlRequest):
+    context = OrchestrationContext(url=request.url, is_mock=True)
+    
+    try:
+        # Use mock endpoint for text extraction
+        await analyze_text_content_mock(context)
+        await analyze_images(context)
+        context.rounds_completed = 1
+        
+        # Check if we have sufficient confidence after round 1
+        overall_confidence = await calculate_overall_confidence(context)
+        
+        # Additional rounds for deeper analysis if needed
+        round_count = 1
+        while (overall_confidence < MIN_CONFIDENCE_THRESHOLD and 
+               round_count < MAX_ROUNDS and 
+               has_more_data_to_analyze(context)):
+            
+            round_count += 1
+            await perform_deeper_analysis(context)
+            context.rounds_completed = round_count
+            overall_confidence = await calculate_overall_confidence(context)
+        
+        # Generate final scores
+        return await generate_final_scores(context)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mock analysis failed: {str(e)}")
+
 async def scrape_initial_data(context: OrchestrationContext):
     """Scrape product page for initial data"""
     async with httpx.AsyncClient(timeout=100.0) as client:
@@ -128,52 +162,62 @@ async def scrape_initial_data(context: OrchestrationContext):
             print(f"Scraping failed: {e}")
 
 async def analyze_text_content(context: OrchestrationContext):
-    """Extract features from product text using AI"""
+    """Extract features from product text using text agent"""
     if not context.product_info or not context.product_info.raw_product_text:
         return
     
-    prompt = f"""
-    Analyze the following product text and extract comprehensive information focused on material composition, durability indicators, allergen warnings, potential risks, safety information, and manufacturing details:
+    async with httpx.AsyncClient(timeout=100.0) as client:
+        try:
+            response = await client.post(
+                f"{TEXT_AGENT_URL}/extract",
+                json={"text": context.product_info.raw_product_text}
+            )
+            response.raise_for_status()
+            result = response.json()
+            context.text_analysis = ProductTextResponse(**result)
+            context.data_sources.append("text_analysis")
+            
+            # Add found images to the pool of images for analysis
+            if context.text_analysis.image_urls:
+                if not context.product_info.images:
+                    context.product_info.images = []
+                context.product_info.images.extend(context.text_analysis.image_urls)
+                # Remove duplicates while preserving order
+                seen = set()
+                context.product_info.images = [x for x in context.product_info.images if not (x in seen or seen.add(x))]
+            
+            # Set initial confidences based on data completeness
+            context.confidences["text_analysis"] = await calculate_text_confidence(context.text_analysis)
+        except Exception as e:
+            print(f"Text analysis failed: {e}")
 
-    Product Text:
-    {context.product_info.raw_product_text}
-
-    Extract and return a JSON object with the following structure:
-    {{
-        "name": "product name or null",
-        "brand": "brand name or null", 
-        "materials": ["list of materials found"],
-        "category": "product category or null",
-        "durability_indicators": ["construction details, reinforcement, quality indicators"],
-        "allergen_warnings": ["specific allergen warnings found"],
-        "potential_risks": ["safety concerns, chemical warnings, usage risks"],
-        "safety_information": ["safety instructions, care warnings"],
-        "manufacturing_details": ["origin, construction methods, quality processes"],
-        "features": []
-    }}
-
-    Be thorough in extracting material composition, construction quality indicators, and any risk-related information.
-    """
-
-    try:
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
-            messages=[
-                {"role": "system", "content": "You are an expert product analyzer. Extract comprehensive product information from text, focusing on materials, durability, risks, and safety. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=3000
-        )
-        
-        result = json.loads(response.choices[0].message.content)
-        context.text_analysis = ProductTextResponse(**result)
-        context.data_sources.append("text_analysis")
-        
-        # Set initial confidences based on data completeness
-        context.confidences["text_analysis"] = await calculate_text_confidence(context.text_analysis)
-    except Exception as e:
-        print(f"Text analysis failed: {e}")
+async def analyze_text_content_mock(context: OrchestrationContext):
+    """Extract features from mock data using text agent"""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            response = await client.get(
+                f"{TEXT_AGENT_URL}/extract-mock",
+            )
+            response.raise_for_status()
+            result = response.json()
+            context.text_analysis = ProductTextResponse(**result)
+            context.data_sources.append("mock_text_analysis")
+            
+            # Add found images to the pool of images for analysis
+            if context.text_analysis.image_urls:
+                if not context.product_info:
+                    context.product_info = ProductInfo()
+                if not context.product_info.images:
+                    context.product_info.images = []
+                context.product_info.images.extend(context.text_analysis.image_urls)
+                # Remove duplicates while preserving order
+                seen = set()
+                context.product_info.images = [x for x in context.product_info.images if not (x in seen or seen.add(x))]
+            
+            # Set initial confidences based on data completeness
+            context.confidences["text_analysis"] = await calculate_text_confidence(context.text_analysis)
+        except Exception as e:
+            print(f"Mock text analysis failed: {e}")
 
 async def analyze_images(context: OrchestrationContext):
     """Analyze product images"""
@@ -255,7 +299,7 @@ async def calculate_overall_confidence(context: OrchestrationContext) -> float:
     """Calculate overall confidence across all data sources using AI"""
     if not context.confidences:
         return 0.0
-    
+
     prompt = f"""
     Calculate overall confidence for product analysis based on these individual confidence scores:
 
@@ -359,7 +403,23 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
             max_tokens=2000
         )
         
-        result = json.loads(response.choices[0].message.content)
+        response_content = response.choices[0].message.content.strip()
+        
+        # Clean up response if it contains markdown formatting
+        if response_content.startswith(''):
+            response_content = response_content.split('\n', 1)[1]
+        if response_content.endswith(''):
+            response_content = response_content.rsplit('\n', 1)[0]
+        
+        # Remove any "json" prefix if present
+        if response_content.startswith('json'):
+            response_content = response_content[4:].strip()
+            
+        result = json.loads(response_content)
+        
+        # Ensure images are counted as data sources
+        final_data_sources = context.data_sources.copy()
+        final_data_sources.extend(context.product_info.images)
         
         return ProductScoreResponse(
             durability_score=result["durability_score"],
@@ -372,12 +432,16 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
             sustainability_confidence=result["sustainability_confidence"],
             explanation=result["explanation"],
             overall_confidence=result["overall_confidence"],
-            data_sources=context.data_sources
+            data_sources=list(set(final_data_sources))
         )
         
     except Exception as e:
         print(f"AI scoring failed: {e}")
         # Fallback to basic scoring
+        final_data_sources = context.data_sources.copy()
+        if context.product_info and context.product_info.images:
+            final_data_sources.extend([f"image_source_{i+1}" for i in range(len(context.product_info.images[:3]))])
+        
         return ProductScoreResponse(
             durability_score=3.0,
             durability_confidence=0.3,
@@ -389,7 +453,7 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
             sustainability_confidence=0.3,
             explanation=["Analysis failed - insufficient data for comprehensive scoring"],
             overall_confidence=0.3,
-            data_sources=context.data_sources
+            data_sources=list(set(final_data_sources))
         )
 
 if __name__ == "__main__":
