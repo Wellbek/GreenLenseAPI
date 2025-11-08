@@ -20,13 +20,17 @@ services:
       - TEXT_AGENT_URL=http://text-agent:8002
     depends_on:
       - text-agent
+    env_file:
+      - .env
 
   text-agent:
     build:
       context: .
       dockerfile: ./agents/text-agent/Dockerfile
-    expose:
+    ports:
       - "8002:8002"
+    env_file:
+      - .env
 
 networks:
   default:
