@@ -1,0 +1,33 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: ./api-gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ORCHESTRATOR_URL=http://orchestrator:8001
+    depends_on:
+      - orchestrator
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: ./agents/orchestrator/Dockerfile
+    ports:
+      - "8001"
+    environment:
+      - TEXT_AGENT_URL=http://text-agent:8002
+    depends_on:
+      - text-agent
+
+  text-agent:
+    build:
+      context: .
+      dockerfile: ./agents/text-agent/Dockerfile
+    expose:
+      - "8002"
+
+networks:
+  default:
+    driver: bridge
