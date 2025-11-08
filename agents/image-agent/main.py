@@ -36,7 +36,7 @@ async def analyze_image_url(payload: ImageUrlRequest):
         raise HTTPException(status_code=400, detail="Image URL is not accessible or invalid.")
 
     try:
-        # ✅ Use Read API for OCR
+        # Use Read API for OCR
         read_response = client.read(image_url, raw=True)
         operation_location = read_response.headers["Operation-Location"]
         operation_id = operation_location.split("/")[-1]
@@ -55,11 +55,11 @@ async def analyze_image_url(payload: ImageUrlRequest):
                 for line in page.lines:
                     text_lines.append(line.text)
 
-        # ✅ Tags (object detection)
+        # Tags (object detection)
         tags_result = client.tag_image(image_url)
         detected_objects = [tag.name for tag in tags_result.tags]
 
-        # ✅ Image description
+        # Image description
         desc_result = client.describe_image(image_url)
         caption = desc_result.captions[0].text if desc_result.captions else "No description"
 

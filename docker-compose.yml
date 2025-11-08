@@ -18,8 +18,12 @@ services:
       - "8001:8001"
     environment:
       - TEXT_AGENT_URL=http://text-agent:8002
+      - IMAGE_AGENT_URL=http://text-agent:8003
+      - SCRAPE_AGENT_URL=http://text-agent:8004
     depends_on:
       - text-agent
+      - image-agent
+      - scrape-agent
     env_file:
       - .env
 
@@ -29,6 +33,24 @@ services:
       dockerfile: ./agents/text-agent/Dockerfile
     ports:
       - "8002:8002"
+    env_file:
+      - .env
+
+  image-agent:
+    build:
+      context: .
+      dockerfile: ./agents/image-agent/Dockerfile
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+
+  scrape-agent:
+    build:
+      context: .
+      dockerfile: ./agents/scrape-agent/Dockerfile
+    ports:
+      - "8004:8004"
     env_file:
       - .env
 
