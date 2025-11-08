@@ -6,7 +6,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 import json
 from typing import List, Optional, Dict, Any
 from openai import AzureOpenAI
@@ -15,6 +15,14 @@ from urllib.parse import urljoin, urlparse
 import re
 
 app = FastAPI(title="Scrape Agent", version="1.0.0")
+
+# Dataset of site-specific CSS classes to limit scraping scope
+SITE_CLASS_FILTERS = {
+    "coupang.com": [
+        "product-btf-container",
+        "prod-atf"
+    ]
+}
 
 class UrlRequest(BaseModel):
     url: HttpUrl
@@ -30,6 +38,20 @@ client = AzureOpenAI(
     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
 )
 
+def get_site_classes(url: str) -> Optional[List[str]]:
+    """Get CSS classes to filter for a specific site if URL matches any configured site"""
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc.lower()
+    
+    print(domain)
+
+    for site_key, classes in SITE_CLASS_FILTERS.items():
+        print(site_key)
+        if site_key in domain:
+            print(site_key)
+            return classes
+    return None
+
 def get_webpage_content(url: str) -> BeautifulSoup:
     """Fetch webpage content and return BeautifulSoup object"""
     headers = {
@@ -37,14 +59,27 @@ def get_webpage_content(url: str) -> BeautifulSoup:
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        print('1')
+        response = requests.get(url, headers=headers, timeout=60)
         response.raise_for_status()
-        return BeautifulSoup(response.content, 'html.parser')
+        print('2')
+
+        # Filter by site-specific classes during parsing if available
+        site_classes = get_site_classes(url)
+        if site_classes:
+            print(site_classes)
+            # Parse only elements with specified classes
+            strainer = SoupStrainer(class_=lambda x: x and any(cls in x.split() for cls in site_classes))
+            soup = BeautifulSoup(response.content, 'html.parser', parse_only=strainer)
+        else:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+        return soup
     except requests.RequestException as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch webpage: {str(e)}")
 
 def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
-    """Extract image URLs from product-relevant HTML sections only"""
+    """Extract image URLs from filtered HTML sections"""
     images = []
     
     # Get raw HTML content for AI analysis
@@ -92,46 +127,33 @@ def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
                 messages=[
                     {
                         "role": "system",
-                        "content": "Identify and return only the HTML sections that contain product information (product details, specifications, descriptions, image galleries). Exclude reviews, navigation, ads, related products, and unrelated content. Return the relevant HTML sections."
+                        "content": "Extract product image URLs from this filtered HTML. Return as JSON array of strings. Focus on main product images, avoid thumbnails, recommended and related products, advertisements."
                     },
                     {
                         "role": "user",
-                        "content": f"Extract product-relevant HTML sections from:\n{html_content[:15000]}"
+                        "content": f"Base URL: {base_url}\n\nHTML: {html_content}"
                     }
                 ],
-                temperature=0.1,
-                max_tokens=3000
+                temperature=0,
+                max_tokens=1000
             )
             
-            relevant_html = section_response.choices[0].message.content.strip()
-            relevant_soup = BeautifulSoup(relevant_html, 'html.parser')
+            content = response.choices[0].message.content.strip()
+            if content.startswith(''):
+                content = content[7:-3]
+            elif content.startswith(''):
+                content = content[3:-3]
             
-            img_tags = relevant_soup.find_all('img')
-            for img in img_tags:
-                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
-                if src:
-                    if src.startswith('/'):
-                        src = urljoin(base_url, src)
-                    elif not src.startswith(('http://', 'https://')):
-                        src = urljoin(base_url, src)
-                    images.append(src)
+            ai_images = json.loads(content)
+            for url in ai_images:
+                if isinstance(url, str) and url.strip():
+                    absolute_url = urljoin(base_url, url.strip())
+                    if absolute_url not in images:
+                        images.append(absolute_url)
         except Exception:
-            # Final fallback: extract all images but filter more strictly
-            img_tags = soup.find_all('img')
-            fallback_images = []
-            
-            for img in img_tags:
-                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
-                if src:
-                    if src.startswith('/'):
-                        src = urljoin(base_url, src)
-                    elif not src.startswith(('http://', 'https://')):
-                        src = urljoin(base_url, src)
-                    fallback_images.append(src)
-            
-            images = fallback_images
+            pass  # Continue with filtered results
     
-    return list(set(images))
+    return images
 
 def extract_product_content(soup: BeautifulSoup) -> str:
     """Use AI to extract only current product content, excluding related items and irrelevant sections"""
@@ -146,22 +168,21 @@ def extract_product_content(soup: BeautifulSoup) -> str:
     # Clean up excessive whitespace
     page_text = re.sub(r'\s+', ' ', page_text).strip()
     
-    # Use AI to filter for current product content only
     try:
         response = client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert at extracting product information from e-commerce websites. Your task is to extract ONLY the ORIGINAL raw text content that relates to the current product being viewed. Include all relevant product information such as descriptions, specifications, features, materials, care instructions, specifications, etc. EXCLUDE: navigation menus, headers, footers, related products, recommended items, advertisements, site-wide information, other products, reviews, and any content not directly about the main product. Return the filtered text as plain text, preserving the ORIGINAL text and structure of the product information. Do not add any information not within the page and make no summaries."
+                    "content": "Extract only current product information from this pre-filtered text. Include descriptions, specifications, features, materials, care instructions. For reviews, summarize highlighting quantity of feedback about quality, durability, allergens, warnings. Preserve original text structure and content."
                 },
                 {
                     "role": "user",
-                    "content": f"Extract only the current product information from this webpage text:\n\n{page_text[:20000]}"
+                    "content": f"Extract current product information from: {page_text[:15000]}"
                 }
             ],
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=5000
         )
         
         filtered_content = response.choices[0].message.content.strip()
@@ -180,7 +201,9 @@ async def scrape_product(request: UrlRequest):
     """Scrape product images and raw text content"""
     url = str(request.url)
     
-    # Get webpage content
+    print('0')
+
+    # Get webpage content (automatically filtered by site classes if applicable)
     soup = get_webpage_content(url)
     
     # Extract images using AI

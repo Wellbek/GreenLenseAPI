@@ -9,6 +9,8 @@ services:
       - ORCHESTRATOR_URL=http://orchestrator:8001
     depends_on:
       - orchestrator
+    env_file:
+      - .env
 
   orchestrator:
     build:
@@ -18,8 +20,8 @@ services:
       - "8001:8001"
     environment:
       - TEXT_AGENT_URL=http://text-agent:8002
-      - IMAGE_AGENT_URL=http://text-agent:8003
-      - SCRAPE_AGENT_URL=http://text-agent:8004
+      - IMAGE_AGENT_URL=http://image-agent:8003
+      - SCRAPE_AGENT_URL=http://scrape-agent:8004
     depends_on:
       - text-agent
       - image-agent

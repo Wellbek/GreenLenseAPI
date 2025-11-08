@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY ./data/coupang/mock_api.json .
 COPY ./agents/text-agent . 
 
 EXPOSE 8002
