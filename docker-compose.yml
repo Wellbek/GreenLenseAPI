@@ -32,6 +32,15 @@ services:
     env_file:
       - .env
 
+  scrape-agent:
+    build:
+      context: .
+      dockerfile: ./agents/scrape-agent/Dockerfile
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+
 networks:
   default:
     driver: bridge
