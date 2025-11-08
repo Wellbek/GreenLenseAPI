@@ -6,3 +6,5 @@ pydantic
 requests
 beautifulsoup4
 openai
+azure-cognitiveservices-vision-computervision
+python-multipart
