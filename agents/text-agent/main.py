@@ -176,7 +176,7 @@ async def process_extraction_result(result, text: str) -> ProductTextResponse:
 
 async def extract_product_features_common(text: str) -> ProductTextResponse:
     """Common extraction logic shared between regular and mock endpoints"""
-    instructions = """
+    instructions = """        print(ai_response)
     Extract product information and important consumer insights:
     - Product name
     - Brand name and manufacturer
