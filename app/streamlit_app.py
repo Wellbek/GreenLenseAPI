@@ -3,6 +3,7 @@ import requests
 import json
 import time
 from pathlib import Path
+import os
 
 # Page config
 st.set_page_config(
@@ -147,7 +148,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # API endpoint
-API_URL = "http://0.0.0.0:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 def get_score_color(score, max_score=5.0):
     """Return color class based on score"""
@@ -338,7 +339,7 @@ with tab1:
                 response = requests.post(
                     f"{API_URL}{endpoint}",
                     json={"url": url},
-                    timeout=300
+                    timeout=500
                 )
                 
                 if response.status_code == 200:

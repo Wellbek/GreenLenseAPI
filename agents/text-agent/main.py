@@ -291,6 +291,7 @@ async def read_file_async(file_path: str) -> str:
     """Read file asynchronously"""
     def _read_file():
         with open(file_path, "r", encoding="utf-8") as file:
+            print(file)
             return file.read()
     
     loop = asyncio.get_event_loop()
