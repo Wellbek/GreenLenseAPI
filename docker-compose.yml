@@ -17,15 +17,17 @@ services:
       context: .
       dockerfile: ./agents/orchestrator/Dockerfile
     ports:
-      - "8001:8001"
+      - "8001"
     environment:
       - TEXT_AGENT_URL=http://text-agent:8002
       - IMAGE_AGENT_URL=http://image-agent:8003
       - SCRAPE_AGENT_URL=http://scrape-agent:8004
+      - ALLERGEN_AGENT_URL=http://allergen-agent:8005
     depends_on:
       - text-agent
       - image-agent
       - scrape-agent
+      - allergen-agent
     env_file:
       - .env
 
@@ -34,7 +36,7 @@ services:
       context: .
       dockerfile: ./agents/text-agent/Dockerfile
     ports:
-      - "8002:8002"
+      - "8002"
     env_file:
       - .env
 
@@ -43,7 +45,7 @@ services:
       context: .
       dockerfile: ./agents/image-agent/Dockerfile
     ports:
-      - "8003:8003"
+      - "8003"
     env_file:
       - .env
 
@@ -52,9 +54,32 @@ services:
       context: .
       dockerfile: ./agents/scrape-agent/Dockerfile
     ports:
-      - "8004:8004"
+      - "8004"
     env_file:
       - .env
+
+  allergen-agent:
+    build:
+      context: .
+      dockerfile: ./agents/allergen-agent/Dockerfile
+    ports:
+      - "8005"
+    env_file:
+      - .env
+
+  streamlit-app:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    ports:
+      - "8500:8500"
+    environment:
+      - API_URL=http://api-gateway:8500
+    depends_on:
+      - api-gateway
+    env_file:
+      - .env
+    restart: unless-stopped
 
 networks:
   default:

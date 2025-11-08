@@ -5,23 +5,36 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
-import requests
+import httpx
 from bs4 import BeautifulSoup, SoupStrainer
 import json
 from typing import List, Optional, Dict, Any
-from openai import AzureOpenAI
+from openai import AsyncAzureOpenAI
 import os
 from urllib.parse import urljoin, urlparse
 import re
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import uvicorn
 
 app = FastAPI(title="Scrape Agent", version="1.0.0")
 
-# Dataset of site-specific CSS classes to limit scraping scope for improved performance
+# Thread pool for CPU-bound operations
+thread_pool = ThreadPoolExecutor(max_workers=4)
+
+# Dataset of site-specific CSS classes and URL keywords to limit scraping scope for improved performance
 SITE_CLASS_FILTERS = {
-    "coupang.com": [
-        "product-btf-container",
-        "prod-atf"
-    ]
+    "coupang": {
+        "classes": [
+            "product-btf-container",
+            "prod-atf"
+        ],
+        "url_keywords": []
+    },
+    "amazon": {
+        "classes": [],
+        "url_keywords": ["aplus-media-library-service-media"]
+    }
 }
 
 class UrlRequest(BaseModel):
@@ -32,7 +45,7 @@ class ProductInfo(BaseModel):
     raw_product_text: str = ""
 
 # Initialize Azure OpenAI client
-client = AzureOpenAI(
+client = AsyncAzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
@@ -43,114 +56,201 @@ def get_site_classes(url: str) -> Optional[List[str]]:
     parsed_url = urlparse(url)
     domain = parsed_url.netloc.lower()
 
-    for site_key, classes in SITE_CLASS_FILTERS.items():
+    for site_key, config in SITE_CLASS_FILTERS.items():
         if site_key in domain:
-            return classes
+            return config.get("classes", [])
     return None
 
-def get_webpage_content(url: str) -> BeautifulSoup:
+def get_site_url_keywords(url: str) -> Optional[List[str]]:
+    """Get URL keywords to filter for a specific site if URL matches any configured site"""
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc.lower()
+
+    for site_key, config in SITE_CLASS_FILTERS.items():
+        if site_key in domain:
+            return config.get("url_keywords", [])
+    return None
+
+def _parse_html_content(content: bytes, url: str) -> BeautifulSoup:
+    """Parse HTML content in thread pool"""
+    site_classes = get_site_classes(url)
+    if site_classes:
+        strainer = SoupStrainer(class_=lambda x: x and any(cls in x.split() for cls in site_classes))
+        soup = BeautifulSoup(content, 'html.parser', parse_only=strainer)
+    else:
+        soup = BeautifulSoup(content, 'html.parser')
+    return soup
+
+async def get_webpage_content(url: str) -> BeautifulSoup:
     """Fetch webpage content and return BeautifulSoup object"""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=60)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=60.0) as client_http:
+            response = await client_http.get(url, headers=headers)
+            response.raise_for_status()
 
-        # Filter by site-specific classes during parsing if available
-        site_classes = get_site_classes(url)
-        if site_classes:
-            # Parse only elements with specified classes
-            strainer = SoupStrainer(class_=lambda x: x and any(cls in x.split() for cls in site_classes))
-            soup = BeautifulSoup(response.content, 'html.parser', parse_only=strainer)
-        else:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
+        # Parse HTML in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        soup = await loop.run_in_executor(thread_pool, _parse_html_content, response.content, url)
+        
         return soup
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch webpage: {str(e)}")
 
-def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
+def filter_and_deduplicate_images(images: List[str], url: str) -> List[str]:
+    """Filter images to only include valid image extensions and remove duplicates, keeping smallest subset"""
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif'}
+    
+    # Get site-specific URL keywords for filtering
+    url_keywords = get_site_url_keywords(url)
+    
+    # First filter: only keep URLs that end with image extensions
+    image_urls = []
+    for img_url in images:
+        parsed_url = urlparse(img_url)
+        path = parsed_url.path.lower()
+        if any(path.endswith(ext) for ext in valid_extensions):
+            # Apply URL keyword filtering if configured for this site
+            if url_keywords:
+                if any(keyword in img_url for keyword in url_keywords):
+                    image_urls.append(img_url)
+            else:
+                image_urls.append(img_url)
+    
+    # Second filter: remove duplicates and keep smallest subset
+    # Group URLs by their base (everything before any extension)
+    url_groups = {}
+    for img_url in image_urls:
+        # Find the base URL by removing everything after the image extension
+        for ext in valid_extensions:
+            if img_url.lower().endswith(ext):
+                base_url = img_url[:img_url.lower().rfind(ext) + len(ext)]
+                if base_url not in url_groups:
+                    url_groups[base_url] = []
+                url_groups[base_url].append(img_url)
+                break
+    
+    # Keep only the shortest URL from each group (smallest subset)
+    filtered_urls = []
+    for base_url, url_list in url_groups.items():
+        shortest_url = min(url_list, key=len)
+        filtered_urls.append(shortest_url)
+    
+    return filtered_urls
+
+def extract_images_fallback(soup: BeautifulSoup, base_url: str) -> List[str]:
+    """Extract image URLs using BeautifulSoup as fallback"""
+    images = []
+    
+    # Find all img tags
+    img_tags = soup.find_all('img')
+    
+    for img in img_tags:
+        # Check src attribute
+        src = img.get('src')
+        if src:
+            absolute_url = urljoin(base_url, src)
+            if absolute_url not in images:
+                images.append(absolute_url)
+        
+        # Check data-src for lazy loaded images
+        data_src = img.get('data-src')
+        if data_src:
+            absolute_url = urljoin(base_url, data_src)
+            if absolute_url not in images:
+                images.append(absolute_url)
+        
+        # Check data-lazy-src, data-original, and other common lazy loading attributes
+        for attr in ['data-lazy-src', 'data-original', 'data-lazy', 'data-image', 'data-img-src']:
+            lazy_src = img.get(attr)
+            if lazy_src:
+                absolute_url = urljoin(base_url, lazy_src)
+                if absolute_url not in images:
+                    images.append(absolute_url)
+    
+    return images
+
+async def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
     """Extract image URLs from filtered HTML sections"""
     images = []
+    
+    # First try BeautifulSoup extraction
+    fallback_images = extract_images_fallback(soup, base_url)
     
     # Get raw HTML content for AI analysis
     html_content = str(soup)
     
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert at analyzing e-commerce HTML to identify product-relevant sections and extract product images. First, identify the HTML sections that contain product information (product details, specifications, descriptions, product galleries, etc.) and ignore reviews, navigation, ads, and unrelated content. Then extract only image URLs from those product-relevant sections that show the actual product being sold. Return URLs as a JSON array. Convert relative URLs to absolute using the base URL provided."
+                    "content": "You are an expert at analyzing e-commerce HTML to extract product related images. Extract image URLs from img src, data-src, srcset, and other image attributes. Return ONLY a JSON array of complete URLs - no explanations. Focus on actual product images, ignore logos, icons, ads."
                 },
                 {
                     "role": "user",
-                    "content": f"Base URL: {base_url}\n\nAnalyze this HTML and extract image URLs only from product-relevant sections (ignore reviews and unrelated content):\n{html_content[:15000]}"
+                    "content": f"Base URL: {base_url}\n\nExtract all image URLs from this HTML:\n{html_content[:15000]}"
                 }
             ],
             temperature=0.1,
-            max_tokens=1000
+            max_tokens=2000
         )
         
         ai_response = response.choices[0].message.content.strip()
         try:
+            # Clean up the response
+            if ai_response.startswith(''):
+                ai_response = ai_response[7:-3]
+            elif ai_response.startswith(''):
+                ai_response = ai_response[3:-3]
+            
             ai_images = json.loads(ai_response)
             if isinstance(ai_images, list):
                 # Convert relative URLs to absolute
                 for img_url in ai_images:
-                    if img_url.startswith('/'):
-                        img_url = urljoin(base_url, img_url)
-                    elif not img_url.startswith(('http://', 'https://')):
-                        img_url = urljoin(base_url, img_url)
-                    images.append(img_url)
+                    if isinstance(img_url, str) and img_url.strip():
+                        clean_url = img_url.strip()
+                        if clean_url.startswith('//'):
+                            # Protocol-relative URLs
+                            parsed_base = urlparse(base_url)
+                            clean_url = f"{parsed_base.scheme}:{clean_url}"
+                        elif clean_url.startswith('/'):
+                            clean_url = urljoin(base_url, clean_url)
+                        elif not clean_url.startswith(('http://', 'https://')):
+                            clean_url = urljoin(base_url, clean_url)
+                        
+                        if clean_url not in images:
+                            images.append(clean_url)
         except json.JSONDecodeError:
-            pass
+            # If AI response is not valid JSON, use fallback
+            images = fallback_images
     except Exception:
-        pass
+        # If AI fails, use fallback
+        images = fallback_images
     
-    # Fallback: extract from product-relevant sections only
-    if not images:
-        # Use AI to identify product-relevant HTML sections first
-        try:
-            section_response = client.chat.completions.create(
-                model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Extract product image URLs from this filtered HTML. Return as JSON array of strings. Focus on main product images, avoid thumbnails, recommended and related products, advertisements."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Base URL: {base_url}\n\nHTML: {html_content}"
-                    }
-                ],
-                temperature=0,
-                max_tokens=1000
-            )
-            
-            content = response.choices[0].message.content.strip()
-            if content.startswith(''):
-                content = content[7:-3]
-            elif content.startswith(''):
-                content = content[3:-3]
-            
-            ai_images = json.loads(content)
-            for url in ai_images:
-                if isinstance(url, str) and url.strip():
-                    absolute_url = urljoin(base_url, url.strip())
-                    if absolute_url not in images:
-                        images.append(absolute_url)
-        except Exception:
-            pass  # Continue with filtered results
+    # Combine AI results with fallback results, removing duplicates
+    all_images = images + [img for img in fallback_images if img not in images]
     
-    return images
+    # Filter out common non-product images
+    filtered_images = []
+    for img_url in all_images:
+        lower_url = img_url.lower()
+        # Skip obvious non-product images
+        if any(skip in lower_url for skip in ['logo', 'icon', 'favicon', 'sprite', 'button', 'arrow', 'social']):
+            continue
+        filtered_images.append(img_url)
+    
+    # Apply image filtering and deduplication with URL keyword filtering
+    final_images = filter_and_deduplicate_images(filtered_images, base_url)
+    
+    return final_images
 
-def extract_product_content(soup: BeautifulSoup) -> str:
-    """Use AI to extract only current product content, excluding related items and irrelevant sections"""
-    
+def _extract_text_content(soup: BeautifulSoup) -> str:
+    """Extract text content in thread pool"""
     # Remove scripts, styles, and other non-content elements
     for element in soup.find_all(['script', 'style', 'noscript']):
         element.decompose()
@@ -160,9 +260,17 @@ def extract_product_content(soup: BeautifulSoup) -> str:
     
     # Clean up excessive whitespace
     page_text = re.sub(r'\s+', ' ', page_text).strip()
+    return page_text
+
+async def extract_product_content(soup: BeautifulSoup) -> str:
+    """Use AI to extract only current product content, excluding related items and irrelevant sections"""
+    
+    # Extract text in thread pool
+    loop = asyncio.get_event_loop()
+    page_text = await loop.run_in_executor(thread_pool, _extract_text_content, soup)
     
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
             messages=[
                 {
@@ -195,19 +303,23 @@ async def scrape_product(request: UrlRequest):
     url = str(request.url)
 
     # Get webpage content (automatically filtered by site classes if applicable)
-    soup = get_webpage_content(url)
+    soup = await get_webpage_content(url)
     
-    # Extract images using AI
-    images = extract_images_from_html(soup, url)
+    # Extract images and content concurrently
+    images_task = extract_images_from_html(soup, url)
+    content_task = extract_product_content(soup)
     
-    # Extract product content using AI
-    raw_product_text = extract_product_content(soup)
+    images, raw_product_text = await asyncio.gather(images_task, content_task)
     
     return ProductInfo(
         images=images,
         raw_product_text=raw_product_text
     )
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup thread pool on shutdown"""
+    thread_pool.shutdown(wait=True)
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8004)
+    uvicorn.run(app, host="0.0.0.0", port=8004, workers=4, loop="asyncio")

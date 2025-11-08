@@ -14,6 +14,7 @@ app = FastAPI(title="Orchestrator Agent", version="1.0.0")
 TEXT_AGENT_URL = os.getenv("TEXT_AGENT_URL", "http://text-agent:8002")
 IMAGE_AGENT_URL = os.getenv("IMAGE_AGENT_URL", "http://image-agent:8003")
 SCRAPE_AGENT_URL = os.getenv("SCRAPE_AGENT_URL", "http://scrape-agent:8004")
+ALLERGEN_AGENT_URL = os.getenv("ALLERGEN_AGENT_URL", "http://allergen-agent:8005")
 
 # Initialize Azure OpenAI client
 client = AzureOpenAI(
@@ -25,6 +26,9 @@ client = AzureOpenAI(
 # Request/Response models
 class UrlRequest(BaseModel):
     url: str
+
+class TextileDescriptionRequest(BaseModel):
+    description: str
 
 class ProductInfo(BaseModel):
     images: List[str] = []
@@ -65,21 +69,23 @@ class ProductScoreResponse(BaseModel):
     explanation: List[str]
     overall_confidence: float
     data_sources: List[str]
+    total_items_identified: int
+    product_summary: Dict[str, Any]
 
 class OrchestrationContext(BaseModel):
     url: str
     product_info: Optional[ProductInfo] = None
     text_analysis: Optional[ProductTextResponse] = None
     image_analyses: List[Dict[str, Any]] = []
+    allergen_analysis: Optional[Dict[str, Any]] = None
     rounds_completed: int = 0
     data_sources: List[str] = []
-    confidences: Dict[str, float] = {}
     is_mock: bool = False
+    current_scores: Optional[ProductScoreResponse] = None
 
 # Configuration
 MAX_ROUNDS = 3
-MIN_CONFIDENCE_THRESHOLD = 0.70
-MIN_OVERALL_CONFIDENCE = 0.60
+MIN_CONFIDENCE_THRESHOLD = 0.65
 
 @app.get("/health")
 async def health_check():
@@ -90,28 +96,32 @@ async def analyze_product(request: UrlRequest):
     context = OrchestrationContext(url=request.url)
     
     try:
-        # Round 1: Initial scraping and basic analysis
-        await scrape_initial_data(context)
-        await analyze_text_content(context)
-        await analyze_images(context)
+        # Round 1: Parallel execution of initial analysis tasks
+        scrape_task = asyncio.create_task(scrape_initial_data(context))
+        await scrape_task
+        
+        # Execute text and image analysis in parallel
+        text_task = asyncio.create_task(analyze_text_content(context))
+        image_task = asyncio.create_task(analyze_images(context))
+        
+        await asyncio.gather(text_task, image_task, return_exceptions=True)
         context.rounds_completed = 1
         
-        # Check if we have sufficient confidence after round 1
-        overall_confidence = await calculate_overall_confidence(context)
+        # Generate initial scores to assess confidence
+        context.current_scores = await generate_current_scores(context)
         
-        # Additional rounds for deeper analysis if needed
+        # Additional rounds for deeper analysis based on confidence scores
         round_count = 1
-        while (overall_confidence < MIN_CONFIDENCE_THRESHOLD and 
-               round_count < MAX_ROUNDS and 
-               has_more_data_to_analyze(context)):
+        while (context.current_scores.overall_confidence < MIN_CONFIDENCE_THRESHOLD and 
+               round_count < MAX_ROUNDS):
             
             round_count += 1
-            await perform_deeper_analysis(context)
+            await perform_confidence_based_analysis(context)
             context.rounds_completed = round_count
-            overall_confidence = await calculate_overall_confidence(context)
+            context.current_scores = await generate_current_scores(context)
         
         # Generate final scores
-        return await generate_final_scores(context)
+        return context.current_scores
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
@@ -121,27 +131,28 @@ async def analyze_product_mock(request: UrlRequest):
     context = OrchestrationContext(url=request.url, is_mock=True)
     
     try:
-        # Use mock endpoint for text extraction
-        await analyze_text_content_mock(context)
-        await analyze_images(context)
+        # Execute mock analysis and image analysis in parallel
+        text_task = asyncio.create_task(analyze_text_content_mock(context))
+        image_task = asyncio.create_task(analyze_images(context))
+        
+        await asyncio.gather(text_task, image_task, return_exceptions=True)
         context.rounds_completed = 1
         
-        # Check if we have sufficient confidence after round 1
-        overall_confidence = await calculate_overall_confidence(context)
+        # Generate initial scores to assess confidence
+        context.current_scores = await generate_current_scores(context)
         
-        # Additional rounds for deeper analysis if needed
+        # Additional rounds for deeper analysis based on confidence scores
         round_count = 1
-        while (overall_confidence < MIN_CONFIDENCE_THRESHOLD and 
-               round_count < MAX_ROUNDS and 
-               has_more_data_to_analyze(context)):
+        while (context.current_scores.overall_confidence < MIN_CONFIDENCE_THRESHOLD and 
+               round_count < MAX_ROUNDS):
             
             round_count += 1
-            await perform_deeper_analysis(context)
+            await perform_confidence_based_analysis(context)
             context.rounds_completed = round_count
-            overall_confidence = await calculate_overall_confidence(context)
+            context.current_scores = await generate_current_scores(context)
         
         # Generate final scores
-        return await generate_final_scores(context)
+        return context.current_scores
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Mock analysis failed: {str(e)}")
@@ -186,8 +197,6 @@ async def analyze_text_content(context: OrchestrationContext):
                 seen = set()
                 context.product_info.images = [x for x in context.product_info.images if not (x in seen or seen.add(x))]
             
-            # Set initial confidences based on data completeness
-            context.confidences["text_analysis"] = await calculate_text_confidence(context.text_analysis)
         except Exception as e:
             print(f"Text analysis failed: {e}")
 
@@ -214,13 +223,11 @@ async def analyze_text_content_mock(context: OrchestrationContext):
                 seen = set()
                 context.product_info.images = [x for x in context.product_info.images if not (x in seen or seen.add(x))]
             
-            # Set initial confidences based on data completeness
-            context.confidences["text_analysis"] = await calculate_text_confidence(context.text_analysis)
         except Exception as e:
             print(f"Mock text analysis failed: {e}")
 
 async def analyze_images(context: OrchestrationContext):
-    """Analyze product images"""
+    """Analyze product images in parallel"""
     if not context.product_info or not context.product_info.images:
         return
     
@@ -228,124 +235,93 @@ async def analyze_images(context: OrchestrationContext):
         # Analyze up to 3 images to avoid timeout
         images_to_analyze = context.product_info.images[:3]
         
-        for image_url in images_to_analyze:
+        # Create tasks for parallel image analysis
+        async def analyze_single_image(image_url: str):
             try:
                 response = await client.post(
                     f"{IMAGE_AGENT_URL}/analyze/url",
                     json={"image_url": image_url}
                 )
                 response.raise_for_status()
-                context.image_analyses.append(response.json())
-                context.data_sources.append("image_analysis")
+                return response.json()
             except Exception as e:
                 print(f"Image analysis failed for {image_url}: {e}")
-
-async def perform_deeper_analysis(context: OrchestrationContext):
-    """Perform deeper analysis in subsequent rounds"""
-    # This would call additional agents like brand-agent, cert-agent, etc.
-    # For now, we'll simulate additional confidence by re-analyzing existing data
-    if context.text_analysis and context.text_analysis.brand:
-        context.confidences["brand_research"] = 0.8
-        context.data_sources.append("brand_research")
-    
-    if context.text_analysis and context.text_analysis.manufacturing_details:
-        context.confidences["manufacturing_verification"] = 0.9
-        context.data_sources.append("manufacturing_verification")
-
-async def calculate_text_confidence(text_analysis: Optional[ProductTextResponse]) -> float:
-    """Calculate confidence based on text analysis completeness using AI"""
-    if not text_analysis:
-        return 0.0
-    
-    prompt = f"""
-    Assess the confidence level of this product analysis based on data completeness and quality:
-
-    Analysis Results:
-    - Name: {text_analysis.name}
-    - Brand: {text_analysis.brand}
-    - Materials: {text_analysis.materials}
-    - Category: {text_analysis.category}
-    - Durability indicators: {text_analysis.durability_indicators}
-    - Allergen warnings: {text_analysis.allergen_warnings}
-    - Potential risks: {text_analysis.potential_risks}
-    - Safety information: {text_analysis.safety_information}
-    - Manufacturing details: {text_analysis.manufacturing_details}
-
-    Return a confidence score between 0.0 and 1.0 based on:
-    - Completeness of information
-    - Specificity of materials and construction details
-    - Presence of safety and risk information
-    - Overall data quality
-
-    Return only the numeric score.
-    """
-
-    try:
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
-            messages=[
-                {"role": "system", "content": "You are an expert at assessing data quality and completeness. Return only a numeric confidence score between 0.0 and 1.0."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=1500
-        )
+                return None
         
-        return float(response.choices[0].message.content.strip())
-    except:
-        return 0.5
-
-async def calculate_overall_confidence(context: OrchestrationContext) -> float:
-    """Calculate overall confidence across all data sources using AI"""
-    if not context.confidences:
-        return 0.0
-
-    prompt = f"""
-    Calculate overall confidence for product analysis based on these individual confidence scores:
-
-    Confidence Scores:
-    {json.dumps(context.confidences, indent=2)}
-
-    Data Sources Available:
-    {context.data_sources}
-
-    Consider the reliability and importance of different data sources. Text analysis and manufacturing verification 
-    should be weighted higher than image analysis. Return a single confidence score between 0.0 and 1.0.
-
-    Return only the numeric score.
-    """
-
-    try:
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
-            messages=[
-                {"role": "system", "content": "You are an expert at data fusion and confidence assessment. Return only a numeric confidence score between 0.0 and 1.0."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=1500
-        )
+        # Execute all image analysis tasks in parallel
+        image_tasks = [analyze_single_image(img_url) for img_url in images_to_analyze]
+        image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
         
-        return float(response.choices[0].message.content.strip())
-    except:
-        return sum(context.confidences.values()) / len(context.confidences) if context.confidences else 0.0
+        # Process results
+        for result in image_results:
+            if result and not isinstance(result, Exception):
+                context.image_analyses.append(result)
+                context.data_sources.append("image_analysis")
 
-def has_more_data_to_analyze(context: OrchestrationContext) -> bool:
-    """Check if there's more data we could potentially analyze"""
-    # If we have brand info but haven't done brand research
-    if (context.text_analysis and context.text_analysis.brand and 
-        "brand_research" not in context.data_sources):
-        return True
-    
-    # If we have manufacturing details but haven't verified them
-    if (context.text_analysis and context.text_analysis.manufacturing_details and 
-        "manufacturing_verification" not in context.data_sources):
-        return True
-    
-    return False
+async def call_allergen_agent(context: OrchestrationContext):
+    """Call allergen agent to analyze materials for allergens"""
+    try:
+        if not context.text_analysis or not context.text_analysis.materials:
+            return
+        
+        # Build simple description from materials
+        description = ", ".join(context.text_analysis.materials)
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{ALLERGEN_AGENT_URL}/analyze/textile",
+                json={"description": description}
+            )
+            response.raise_for_status()
+            context.allergen_analysis = response.json()
+            context.data_sources.append("allergen_agent_analysis")
+            
+    except Exception as e:
+        print(f"Allergen agent call failed: {e}")
 
-async def generate_final_scores(context: OrchestrationContext) -> ProductScoreResponse:
-    """Generate final product scores using AI analysis of all available data"""
+async def perform_confidence_based_analysis(context: OrchestrationContext):
+    """Perform targeted analysis based on current confidence scores"""
+    tasks = []
+    
+    # Check if we need more image analysis
+    if (context.current_scores.overall_confidence < MIN_CONFIDENCE_THRESHOLD and
+        context.product_info and 
+        len(context.product_info.images) > len(context.image_analyses)):
+        
+        remaining_images = context.product_info.images[len(context.image_analyses):len(context.image_analyses) + 2]
+        
+        async def analyze_additional_images():
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                for image_url in remaining_images:
+                    try:
+                        response = await client.post(
+                            f"{IMAGE_AGENT_URL}/analyze/url",
+                            json={"image_url": image_url}
+                        )
+                        response.raise_for_status()
+                        result = response.json()
+                        if result:
+                            context.image_analyses.append(result)
+                            context.data_sources.append("additional_image_analysis")
+                    except Exception as e:
+                        print(f"Additional image analysis failed for {image_url}: {e}")
+        
+        tasks.append(analyze_additional_images())
+    
+    # Call allergen agent if confidence is low and we have materials
+    if (context.current_scores.allergen_confidence < MIN_CONFIDENCE_THRESHOLD and
+        context.text_analysis and 
+        context.text_analysis.materials and
+        not context.allergen_analysis):
+        
+        tasks.append(call_allergen_agent(context))
+    
+    # Execute all tasks in parallel
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+async def generate_current_scores(context: OrchestrationContext) -> ProductScoreResponse:
+    """Generate current product scores based on available data"""
     
     # Compile all available information
     product_data = {
@@ -357,15 +333,23 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
         "manufacturing_details": context.text_analysis.manufacturing_details if context.text_analysis else [],
         "brand": context.text_analysis.brand if context.text_analysis else "Unknown",
         "category": context.text_analysis.category if context.text_analysis else "Unknown",
+        "name": context.text_analysis.name if context.text_analysis else "Unknown",
         "image_analyses": context.image_analyses,
-        "data_sources": context.data_sources
+        "data_sources": context.data_sources,
+        "rounds_completed": context.rounds_completed
     }
+    
+    # Include allergen analysis if available
+    if context.allergen_analysis:
+        product_data["allergen_analysis"] = context.allergen_analysis
 
     prompt = f"""
-    Analyze this comprehensive product data and provide detailed scoring with confidence levels:
+    Analyze this product data and provide detailed scoring with confidence levels:
 
     Product Data:
     {json.dumps(product_data, indent=2)}
+
+    If allergen_analysis is present, use it to assess allergen risk and confidence.
 
     Provide a detailed analysis and scoring in the following JSON format:
     {{
@@ -377,26 +361,33 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
         "quality_confidence": 0.0-1.0,
         "sustainability_score": 0.0-5.0,
         "sustainability_confidence": 0.0-1.0,
-        "explanation": ["detailed explanations for each score"],
-        "overall_confidence": 0.0-1.0
+        "explanation": ["detailed explanations for each score linked to data sources"],
+        "overall_confidence": 0.0-1.0,
+        "total_items_identified": <count of all identified items>,
+        "product_summary": {{
+            "name": "product name",
+            "brand": "product brand",
+            "materials": ["list of materials"],
+            "category": "product category",
+            "durability_indicators": ["list of durability indicators"],
+            "allergen_warnings": ["list of allergen warnings"],
+            "potential_risks": ["list of potential risks"],
+            "safety_information": ["list of safety information"],
+            "manufacturing_details": ["list of manufacturing details"]
+        }}
     }}
 
-    Base your scoring on:
-    - Material quality and durability characteristics
-    - Manufacturing processes and construction quality
-    - Allergen presence and risk factors
-    - Safety information and potential risks
-    - Brand reputation and quality indicators
-    - Environmental impact of materials and processes
-
-    Provide justified confidence scores based on data availability and reliability.
+    Confidence scoring guidelines:
+    - High confidence (0.8-1.0): Comprehensive data from multiple sources
+    - Medium confidence (0.5-0.79): Adequate data but some gaps
+    - Low confidence (0.0-0.49): Limited data
     """
 
     try:
         response = client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
             messages=[
-                {"role": "system", "content": "You are an expert product quality assessor. Analyze all available product data and provide comprehensive scoring with justified confidence levels. Return only valid JSON."},
+                {"role": "system", "content": "You are an expert product quality assessor. Return only valid JSON."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
@@ -405,21 +396,20 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
         
         response_content = response.choices[0].message.content.strip()
         
-        # Clean up response if it contains markdown formatting
-        if response_content.startswith(''):
+        # Clean up response
+        if response_content.startswith('```json'):
             response_content = response_content.split('\n', 1)[1]
-        if response_content.endswith(''):
+        if response_content.endswith('```'):
             response_content = response_content.rsplit('\n', 1)[0]
-        
-        # Remove any "json" prefix if present
         if response_content.startswith('json'):
             response_content = response_content[4:].strip()
             
         result = json.loads(response_content)
         
-        # Ensure images are counted as data sources
+        # Include images in data sources
         final_data_sources = context.data_sources.copy()
-        final_data_sources.extend(context.product_info.images)
+        if context.product_info and context.product_info.images:
+            final_data_sources.extend(context.product_info.images)
         
         return ProductScoreResponse(
             durability_score=result["durability_score"],
@@ -432,15 +422,44 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
             sustainability_confidence=result["sustainability_confidence"],
             explanation=result["explanation"],
             overall_confidence=result["overall_confidence"],
-            data_sources=list(set(final_data_sources))
+            data_sources=list(set(final_data_sources)),
+            total_items_identified=result.get("total_items_identified", 0),
+            product_summary=result.get("product_summary", {})
         )
         
     except Exception as e:
         print(f"AI scoring failed: {e}")
-        # Fallback to basic scoring
+        # Fallback scoring
         final_data_sources = context.data_sources.copy()
         if context.product_info and context.product_info.images:
-            final_data_sources.extend([f"image_source_{i+1}" for i in range(len(context.product_info.images[:3]))])
+            final_data_sources.extend(context.product_info.images)
+        
+        fallback_total = 0
+        fallback_summary = {
+            "name": context.text_analysis.name if context.text_analysis else "Unknown",
+            "brand": context.text_analysis.brand if context.text_analysis else "Unknown",
+            "materials": context.text_analysis.materials if context.text_analysis else [],
+            "category": context.text_analysis.category if context.text_analysis else "Unknown",
+            "durability_indicators": context.text_analysis.durability_indicators if context.text_analysis else [],
+            "allergen_warnings": context.text_analysis.allergen_warnings if context.text_analysis else [],
+            "potential_risks": context.text_analysis.potential_risks if context.text_analysis else [],
+            "safety_information": context.text_analysis.safety_information if context.text_analysis else [],
+            "manufacturing_details": context.text_analysis.manufacturing_details if context.text_analysis else []
+        }
+        
+        if context.text_analysis:
+            if context.text_analysis.name and context.text_analysis.name != "Unknown":
+                fallback_total += 1
+            if context.text_analysis.brand and context.text_analysis.brand != "Unknown":
+                fallback_total += 1
+            if context.text_analysis.category and context.text_analysis.category != "Unknown":
+                fallback_total += 1
+            fallback_total += len(context.text_analysis.materials)
+            fallback_total += len(context.text_analysis.durability_indicators)
+            fallback_total += len(context.text_analysis.allergen_warnings)
+            fallback_total += len(context.text_analysis.potential_risks)
+            fallback_total += len(context.text_analysis.safety_information)
+            fallback_total += len(context.text_analysis.manufacturing_details)
         
         return ProductScoreResponse(
             durability_score=3.0,
@@ -451,11 +470,13 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
             quality_confidence=0.3,
             sustainability_score=3.0,
             sustainability_confidence=0.3,
-            explanation=["Analysis failed - insufficient data for comprehensive scoring"],
+            explanation=["Analysis failed - insufficient data"],
             overall_confidence=0.3,
-            data_sources=list(set(final_data_sources))
+            data_sources=list(set(final_data_sources)),
+            total_items_identified=fallback_total,
+            product_summary=fallback_summary
         )
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8001, workers=4)
