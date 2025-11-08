@@ -1,0 +1,398 @@
+{
+  "code": "SUCCESS",
+  "message": "",
+  "data": {
+    "sellerProductId": 290176209,
+    "sellerProductName": "옥스타_남녀공용_불독자수패치_특양면맨투맨_9SSP020",
+    "displayCategoryCode": 23456,
+    "categoryId": 2341,
+    "productId": 290176209,
+    "vendorId": "A00054821",
+    "mdId": "OXST",
+    "mdName": "옥스타코리아",
+    "saleStartedAt": "2020-03-01T09:00:00",
+    "saleEndedAt": "2099-12-31T23:59:59",
+    "displayProductName": "옥스타 남녀공용 불독 자수패치 특양면 맨투맨 9SSP020",
+    "brand": "옥스타",
+    "generalProductName": "불독 자수패치 특양면 맨투맨",
+    "productGroup": "맨투맨/스웨트셔츠",
+    "statusName": "승인완료",
+    "deliveryMethod": "VENDOR_DIRECT",
+    "deliveryCompanyCode": "CJGLS",
+    "deliveryChargeType": "FREE",
+    "deliveryCharge": 0,
+    "freeShipOverAmount": 19800,
+    "deliveryChargeOnReturn": 5000,
+    "deliverySurcharge": 0,
+    "remoteAreaDeliverable": "Y",
+    "bundlePackingDelivery": 1,
+    "unionDeliveryType": "UNION_DELIVERY",
+    "returnCenterCode": "8821475620",
+    "returnChargeName": "옥스타_반품센터",
+    "companyContactNumber": "1577-7011",
+    "returnZipCode": "13487",
+    "returnAddress": "경기도 성남시 분당구 판교역로",
+    "returnAddressDetail": "235 에이치스퀘어 N동 7층",
+    "returnCharge": 5000,
+    "outboundShippingPlaceCode": 88214,
+    "vendorUserId": "oxstar_vendor_2020",
+    "requested": false,
+    "items": [
+      {
+        "offerCondition": "NEW",
+        "offerDescription": "360g 고중량 특양면 원단, 봄/가을 시즌용",
+        "sellerProductItemId": 3371172280,
+        "vendorItemId": 9882147562,
+        "itemId": 3371172280,
+        "itemName": "2XL_다크그린",
+        "originalPrice": 29800,
+        "salePrice": 25330,
+        "supplyPrice": 22000,
+        "maximumBuyCount": 10,
+        "maximumBuyForPerson": 5,
+        "outboundShippingTimeDay": 1,
+        "maximumBuyForPersonPeriod": 30,
+        "unitCount": 1,
+        "adultOnly": "EVERYONE",
+        "freePriceType": null,
+        "taxType": "TAX",
+        "parallelImported": "NOT_PARALLEL_IMPORTED",
+        "overseasPurchased": "NOT_OVERSEAS_PURCHASED",
+        "externalVendorSku": "9SSP020-2XL-DGREEN",
+        "pccNeeded": false,
+        "bestPriceGuaranteed3P": false,
+        "emptyBarcode": false,
+        "emptyBarcodeReason": null,
+        "barcode": "8809512847621",
+        "saleAgentCommission": 12,
+        "modelNo": "9SSP020",
+        "images": [
+          {
+            "imageOrder": 0,
+            "imageType": "REPRESENTATION",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/492x492ex/image/retail/images/2020/08/14/20/8/b0695475-98ed-4099-8e7b-b99bc3a08e47.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 1,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/492x492ex/image/retail/images/9118510931955-5735e24b-d857-4235-a389-431c12aa3712.PNG",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 2,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11289854097107-cb64a8fa-6a95-403e-930b-149b3c1c6d73.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 3,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11289623862876-e24c2f85-4a7f-49c7-9292-e39f1a5f351f.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 4,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11289444865351-bb8a1f38-d4af-4378-8cf3-4b8e28ee5b88.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 5,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11290178181843-b58d9b88-48fe-4e80-9caf-77c61fe07a7f.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 6,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11290025244200-7cd3f7ca-fcfa-4e94-84b1-c479299f96b2.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 7,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11289278696750-23b43f53-b3d6-4d2b-adcc-2d7372acc22b.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 8,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11290439845283-bb8f2e85-aeaf-47c8-8d5e-f7bcdb9dfc50.jpg",
+            "vendorPath": ""
+          },
+          {
+            "imageOrder": 9,
+            "imageType": "DETAIL",
+            "cdnPath": "https://thumbnail.coupangcdn.com/thumbnails/remote/q89/image/retail/images/11290319881421-af47ef1a-65a1-400b-b0af-e1b469411e06.jpg",
+            "vendorPath": ""
+          }
+        ],
+        "notices": [
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "제품소재",
+            "content": "면 65%, 폴리에스터 35% (면혼방)"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "색상",
+            "content": "다크그린"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "치수",
+            "content": "2XL (어깨너비 60cm, 가슴단면 63cm, 소매길이 62cm, 총장 75cm)"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "제조자",
+            "content": "옥스타코리아"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "제조국",
+            "content": "대한민국"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "취급시 주의사항",
+            "content": "드라이클리닝 권장, 단독 세탁, 염색 또는 이염 우려가 있으니 주의"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "제조연월",
+            "content": "2025년 9월"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "품질보증기준",
+            "content": "관련법 및 소비자분쟁해결규정에 따름"
+          },
+          {
+            "noticeCategoryName": "의류",
+            "noticeCategoryDetailName": "A/S 책임자와 전화번호",
+            "content": "옥스타코리아 / 1577-7011"
+          }
+        ],
+        "attributes": [
+          {
+            "attributeTypeName": "성별",
+            "attributeValueName": "남녀공용",
+            "exposed": "EXPOSED",
+            "editable": false
+          },
+          {
+            "attributeTypeName": "사이즈",
+            "attributeValueName": "2XL (110)",
+            "exposed": "EXPOSED",
+            "editable": true
+          },
+          {
+            "attributeTypeName": "색상계열",
+            "attributeValueName": "그린계열",
+            "exposed": "EXPOSED",
+            "editable": false
+          },
+          {
+            "attributeTypeName": "소재",
+            "attributeValueName": "면혼방",
+            "exposed": "EXPOSED",
+            "editable": false
+          },
+          {
+            "attributeTypeName": "안감종류",
+            "attributeValueName": "기본",
+            "exposed": "NONE",
+            "editable": false
+          },
+          {
+            "attributeTypeName": "사용계절",
+            "attributeValueName": "봄/가을용",
+            "exposed": "EXPOSED",
+            "editable": false
+          },
+          {
+            "attributeTypeName": "원단무게",
+            "attributeValueName": "360g 고중량",
+            "exposed": "EXPOSED",
+            "editable": false
+          },
+          {
+            "attributeTypeName": "디자인",
+            "attributeValueName": "불독 자수패치",
+            "exposed": "EXPOSED",
+            "editable": false
+          }
+        ],
+        "contents": [
+          {
+          },
+          {
+            "contentsType": "TEXT",
+            "contentDetails": [
+              {
+                "content": "<div><h3>제품 특징</h3><ul><li>360g 고중량 특양면 원단 사용</li><li>부드러운 면 터치감과 폴리에스터의 형태 안정성</li><li>귀여운 불독 자수 패치 포인트</li><li>남녀공용 루즈핏 디자인</li><li>봄/가을/초겨울 3시즌 착용 가능</li></ul></div>",
+                "detailType": "TEXT"
+              }
+            ]
+          }
+        ],
+        "certifications": [
+          {
+            "certificationType": "NOT_REQUIRED",
+            "certificationCode": ""
+          }
+        ],
+        "extraProperties": {
+          "transactionType": "manufacturer",
+          "fabricWeight": "360g",
+          "season": "spring_fall",
+          "fit": "loose_fit",
+          "businessType": "Fashion"
+        },
+        "searchTags": [
+          "맨투맨",
+          "스웨트셔츠",
+          "옥스타",
+          "불독",
+          "자수",
+          "면혼방",
+          "특양면",
+          "루즈핏",
+          "봄옷",
+          "가을옷",
+          "남녀공용",
+          "커플룩"
+        ],
+        "reviews": [
+          {
+            "reviewId": "R2025110112847",
+            "userId": "user****3421",
+            "rating": 5,
+            "title": "좋은 품질입니다",
+            "content": "세탁 후에도 형태가 유지되고 색이 바래지 않아요. 360g 원단이라 그런지 묵직하고 고급스러워 보입니다. 자수 패치도 튼튼하게 박혀있어서 만족합니다.",
+            "createdAt": "2025-10-15T14:23:11",
+            "isVerifiedPurchase": true,
+            "helpfulCount": 42,
+            "images": [
+              "http://img1a.coupangcdn.com/image/review/R2025110112847_1.jpg",
+              "http://img1a.coupangcdn.com/image/review/R2025110112847_2.jpg"
+            ],
+            "attributes": {
+              "durability": "excellent",
+              "color_accuracy": "accurate",
+              "size_fit": "true_to_size"
+            }
+          },
+          {
+            "reviewId": "R2025102014562",
+            "userId": "happy****7821",
+            "rating": 4,
+            "title": "사이즈 크고 편해요",
+            "content": "사이즈가 생각보다 크고 면 소재라 편해요. 가을에 입기 좋습니다. 길이도 넉넉해서 키 큰 사람한테도 잘 맞을 것 같아요. 다만 약간 루즈한 핏이라 딱 맞는 걸 원하시면 한 사이즈 작게 주문하시는 게 좋을 듯.",
+            "createdAt": "2025-10-20T09:47:33",
+            "isVerifiedPurchase": true,
+            "helpfulCount": 28,
+            "images": [],
+            "attributes": {
+              "comfort": "very_comfortable",
+              "size_fit": "runs_large",
+              "material_quality": "good"
+            }
+          },
+          {
+            "reviewId": "R2025102817493",
+            "userId": "cool****2947",
+            "rating": 4,
+            "title": "약간의 보풀 있지만 전체적으로 만족",
+            "content": "5회 세탁 후 약간의 보풀이 생겼지만 전체적으로 만족합니다. 면 혼방이라 그런지 세탁해도 늘어나지 않고 형태 유지가 잘 되네요. 색상도 사진과 거의 동일합니다.",
+            "createdAt": "2025-10-28T19:12:05",
+            "isVerifiedPurchase": true,
+            "helpfulCount": 15,
+            "images": [
+              "http://img1a.coupangcdn.com/image/review/R2025102817493_1.jpg"
+            ],
+            "attributes": {
+              "durability": "good",
+              "pilling": "minor_pilling",
+              "wash_performance": "excellent"
+            }
+          },
+          {
+            "reviewId": "R2025110108374",
+            "userId": "green****5612",
+            "rating": 5,
+            "title": "자수 패치 귀엽고 두께감 적당",
+            "content": "자수 패치가 귀엽고 두께감이 적당해서 봄가을에 입기 좋아요. 안감이 기모가 아니라 여름 빼고 3시즌 다 입을 수 있을 것 같습니다. 불독 자수가 생각보다 디테일하고 퀄리티가 좋아요.",
+            "createdAt": "2025-11-01T16:28:47",
+            "isVerifiedPurchase": true,
+            "helpfulCount": 31,
+            "images": [
+              "http://img1a.coupangcdn.com/image/review/R2025110108374_1.jpg"
+            ],
+            "attributes": {
+              "design": "excellent",
+              "thickness": "appropriate",
+              "embroidery_quality": "excellent"
+            }
+          },
+          {
+            "reviewId": "R2025110512846",
+            "userId": "minsu****8234",
+            "rating": 5,
+            "title": "재구매 의사 있습니다",
+            "content": "처음에 다크그린 구매했다가 너무 맘에 들어서 네이비도 추가 구매했어요. 가격 대비 품질이 훌륭합니다. 국내 제조라 그런지 마감도 깔끔하고 실밥 같은 거 하나도 없어요. 색상별로 다 사고 싶네요.",
+            "createdAt": "2025-11-05T11:35:22",
+            "isVerifiedPurchase": true,
+            "helpfulCount": 19,
+            "images": [],
+            "attributes": {
+              "value_for_money": "excellent",
+              "quality": "excellent",
+              "finishing": "excellent"
+            }
+          },
+          {
+            "reviewId": "R2025110712934",
+            "userId": "style****4421",
+            "rating": 4,
+            "title": "약간 무겁지만 고급스러워요",
+            "content": "360g 원단이라 일반 맨투맨보다 묵직한 편이에요. 처음엔 무겁다 생각했는데 입어보니 그 무게감이 오히려 고급스럽고 형태가 잘 살아서 좋더라구요. 여름엔 못 입을 것 같고 초가을부터 늦봄까지 활용도 높을 것 같습니다.",
+            "createdAt": "2025-11-07T13:42:18",
+            "isVerifiedPurchase": true,
+            "helpfulCount": 8,
+            "images": [],
+            "attributes": {
+              "weight": "heavy",
+              "premium_feel": "excellent",
+              "seasonality": "fall_winter_spring"
+            }
+          }
+        ],
+        "reviewSummary": {
+          "totalReviews": 127,
+          "averageRating": 4.5,
+          "ratingDistribution": {
+            "5star": 72,
+            "4star": 43,
+            "3star": 8,
+            "2star": 3,
+            "1star": 1
+          },
+          "verifiedPurchaseCount": 119,
+          "keywordMentions": {
+            "품질좋음": 34,
+            "편함": 41,
+            "두께적당": 28,
+            "자수귀여움": 19,
+            "사이즈큼": 15,
+            "면소재": 22,
+            "보풀": 4,
+            "색상정확": 26,
+            "형태유지": 18
+          }
+        }
+      }]
+    }
+}
