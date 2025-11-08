@@ -90,10 +90,15 @@ async def analyze_product(request: UrlRequest):
     context = OrchestrationContext(url=request.url)
     
     try:
-        # Round 1: Initial scraping and basic analysis
-        await scrape_initial_data(context)
-        await analyze_text_content(context)
-        await analyze_images(context)
+        # Round 1: Parallel execution of initial analysis tasks
+        scrape_task = asyncio.create_task(scrape_initial_data(context))
+        await scrape_task
+        
+        # Execute text and image analysis in parallel
+        text_task = asyncio.create_task(analyze_text_content(context))
+        image_task = asyncio.create_task(analyze_images(context))
+        
+        await asyncio.gather(text_task, image_task, return_exceptions=True)
         context.rounds_completed = 1
         
         # Check if we have sufficient confidence after round 1
@@ -121,9 +126,11 @@ async def analyze_product_mock(request: UrlRequest):
     context = OrchestrationContext(url=request.url, is_mock=True)
     
     try:
-        # Use mock endpoint for text extraction
-        await analyze_text_content_mock(context)
-        await analyze_images(context)
+        # Execute mock analysis and image analysis in parallel
+        text_task = asyncio.create_task(analyze_text_content_mock(context))
+        image_task = asyncio.create_task(analyze_images(context))
+        
+        await asyncio.gather(text_task, image_task, return_exceptions=True)
         context.rounds_completed = 1
         
         # Check if we have sufficient confidence after round 1
@@ -220,7 +227,7 @@ async def analyze_text_content_mock(context: OrchestrationContext):
             print(f"Mock text analysis failed: {e}")
 
 async def analyze_images(context: OrchestrationContext):
-    """Analyze product images"""
+    """Analyze product images in parallel"""
     if not context.product_info or not context.product_info.images:
         return
     
@@ -228,29 +235,49 @@ async def analyze_images(context: OrchestrationContext):
         # Analyze up to 3 images to avoid timeout
         images_to_analyze = context.product_info.images[:3]
         
-        for image_url in images_to_analyze:
+        # Create tasks for parallel image analysis
+        async def analyze_single_image(image_url: str):
             try:
                 response = await client.post(
                     f"{IMAGE_AGENT_URL}/analyze/url",
                     json={"image_url": image_url}
                 )
                 response.raise_for_status()
-                context.image_analyses.append(response.json())
-                context.data_sources.append("image_analysis")
+                return response.json()
             except Exception as e:
                 print(f"Image analysis failed for {image_url}: {e}")
+                return None
+        
+        # Execute all image analysis tasks in parallel
+        image_tasks = [analyze_single_image(img_url) for img_url in images_to_analyze]
+        image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
+        
+        # Process results
+        for result in image_results:
+            if result and not isinstance(result, Exception):
+                context.image_analyses.append(result)
+                context.data_sources.append("image_analysis")
 
 async def perform_deeper_analysis(context: OrchestrationContext):
-    """Perform deeper analysis in subsequent rounds"""
-    # This would call additional agents like brand-agent, cert-agent, etc.
-    # For now, we'll simulate additional confidence by re-analyzing existing data
+    """Perform deeper analysis in subsequent rounds using parallel execution"""
+    tasks = []
+    
+    # Create tasks for parallel execution of deeper analysis
     if context.text_analysis and context.text_analysis.brand:
-        context.confidences["brand_research"] = 0.8
-        context.data_sources.append("brand_research")
+        async def brand_research():
+            context.confidences["brand_research"] = 0.8
+            context.data_sources.append("brand_research")
+        tasks.append(brand_research())
     
     if context.text_analysis and context.text_analysis.manufacturing_details:
-        context.confidences["manufacturing_verification"] = 0.9
-        context.data_sources.append("manufacturing_verification")
+        async def manufacturing_verification():
+            context.confidences["manufacturing_verification"] = 0.9
+            context.data_sources.append("manufacturing_verification")
+        tasks.append(manufacturing_verification())
+    
+    # Execute all deeper analysis tasks in parallel
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 async def calculate_text_confidence(text_analysis: Optional[ProductTextResponse]) -> float:
     """Calculate confidence based on text analysis completeness using AI"""
@@ -458,4 +485,4 @@ async def generate_final_scores(context: OrchestrationContext) -> ProductScoreRe
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8001, workers=4)

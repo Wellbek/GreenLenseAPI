@@ -2,6 +2,9 @@ from dotenv import load_dotenv
 import os
 import json
 import re
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from functools import partial
 
 load_dotenv()
 
@@ -17,8 +20,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Text Agent", version="1.0.0")
 
+# Thread pool for CPU-bound operations
+thread_pool = ThreadPoolExecutor(max_workers=4)
+
 class ProductTextRequest(BaseModel):
     text: str
+
+class BatchProductTextRequest(BaseModel):
+    texts: List[str]
 
 class ProductFeature(BaseModel):
     feature_type: str
@@ -40,6 +49,10 @@ class ProductTextResponse(BaseModel):
     features: List[ProductFeature] = []
     image_urls: List[str] = []
 
+class BatchProductTextResponse(BaseModel):
+    results: List[ProductTextResponse]
+    processing_stats: Dict[str, Any]
+
 config = lx.factory.ModelConfig(
     model_id=os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME'),
     provider="AzureOpenAILanguageModel",
@@ -50,18 +63,116 @@ config = lx.factory.ModelConfig(
     }
 )
 
-def extract_image_urls(text: str) -> List[str]:
+async def extract_image_urls_async(text: str) -> List[str]:
     """Extract URLs ending with common image extensions from text"""
-    image_extensions = r'\.(jpg|jpeg|png|gif|bmp|webp|svg|tiff|ico)'
-    url_pattern = r'https?://[^\s<>"]+?' + image_extensions + r'(?:\?[^\s<>"]*)?'
+    def _extract_urls(text: str) -> List[str]:
+        image_extensions = r'\.(jpg|jpeg|png|gif|bmp|webp|svg|tiff|ico)'
+        url_pattern = r'https?://[^\s<>"]+?' + image_extensions + r'(?:\?[^\s<>"]*)?'
+        
+        matches = re.findall(url_pattern, text, re.IGNORECASE)
+        image_urls = []
+        
+        for match in re.finditer(url_pattern, text, re.IGNORECASE):
+            image_urls.append(match.group(0))
+        
+        return list(set(image_urls))
     
-    matches = re.findall(url_pattern, text, re.IGNORECASE)
-    image_urls = []
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(thread_pool, _extract_urls, text)
+
+async def process_extraction_result(result, text: str) -> ProductTextResponse:
+    """Process extraction results in parallel"""
+    response = ProductTextResponse()
     
-    for match in re.finditer(url_pattern, text, re.IGNORECASE):
-        image_urls.append(match.group(0))
+    # Extract image URLs concurrently
+    image_urls_task = asyncio.create_task(extract_image_urls_async(text))
     
-    return list(set(image_urls))
+    # Process extractions
+    def _process_extractions(extractions):
+        processed_features = []
+        name, brand, category = None, None, None
+        materials, durability_indicators, allergen_warnings = [], [], []
+        potential_risks, safety_information, manufacturing_details = [], [], []
+        
+        for extraction in extractions:
+            if hasattr(extraction, 'char_interval') and extraction.char_interval is not None:
+                char_start = extraction.char_interval.start_pos
+                char_end = extraction.char_interval.end_pos
+            else:
+                char_start = 0
+                char_end = len(extraction.extraction_text)
+            
+            attributes = extraction.attributes if extraction.attributes is not None else {}
+            
+            feature = ProductFeature(
+                feature_type=extraction.extraction_class,
+                feature_text=extraction.extraction_text,
+                attributes=attributes,
+                char_start=char_start,
+                char_end=char_end
+            )
+            processed_features.append(feature)
+            
+            # Categorize extractions
+            extraction_text = extraction.extraction_text
+            extraction_class = extraction.extraction_class
+            
+            if extraction_class == "name":
+                name = extraction_text
+            elif extraction_class == "brand":
+                brand = extraction_text
+            elif extraction_class == "material":
+                materials.append(extraction_text)
+            elif extraction_class == "category":
+                category = extraction_text
+            elif extraction_class == "durability_indicator":
+                durability_indicators.append(extraction_text)
+            elif extraction_class == "allergen_warning":
+                allergen_warnings.append(extraction_text)
+            elif extraction_class == "potential_risk":
+                potential_risks.append(extraction_text)
+            elif extraction_class == "safety_information":
+                safety_information.append(extraction_text)
+            elif extraction_class == "manufacturing_detail":
+                manufacturing_details.append(extraction_text)
+        
+        return {
+            'features': processed_features,
+            'name': name,
+            'brand': brand,
+            'materials': materials,
+            'category': category,
+            'durability_indicators': durability_indicators,
+            'allergen_warnings': allergen_warnings,
+            'potential_risks': potential_risks,
+            'safety_information': safety_information,
+            'manufacturing_details': manufacturing_details
+        }
+    
+    # Process extractions in thread pool
+    loop = asyncio.get_event_loop()
+    extraction_data = await loop.run_in_executor(
+        thread_pool, 
+        _process_extractions, 
+        result.extractions
+    )
+    
+    # Wait for image URLs extraction
+    response.image_urls = await image_urls_task
+    
+    # Populate response
+    response.features = extraction_data['features']
+    response.name = extraction_data['name']
+    response.brand = extraction_data['brand']
+    response.materials = extraction_data['materials']
+    response.category = extraction_data['category']
+    response.durability_indicators = extraction_data['durability_indicators']
+    response.allergen_warnings = extraction_data['allergen_warnings']
+    response.potential_risks = extraction_data['potential_risks']
+    response.safety_information = extraction_data['safety_information']
+    response.manufacturing_details = extraction_data['manufacturing_details']
+
+    return response
 
 async def extract_product_features_common(text: str) -> ProductTextResponse:
     """Common extraction logic shared between regular and mock endpoints"""
@@ -155,65 +266,40 @@ async def extract_product_features_common(text: str) -> ProductTextResponse:
         ]
     )
 
-    result = lx.extract(
-        text_or_documents=text,
-        prompt_description=instructions,
-        examples=[example],
-        config=config,
-        # fence_output=True,
-        # use_schema_constraints=False
+    def _extract_sync(text, instructions, example, config):
+        return lx.extract(
+            text_or_documents=text,
+            prompt_description=instructions,
+            examples=[example],
+            config=config,
+        )
+    
+    # Run extraction in thread pool to avoid blocking
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        thread_pool,
+        _extract_sync,
+        text,
+        instructions,
+        example,
+        config
     )
 
-    response = ProductTextResponse()
-    
-    # Extract image URLs from the text
-    response.image_urls = extract_image_urls(text)
-    
-    for extraction in result.extractions:
-        if hasattr(extraction, 'char_interval') and extraction.char_interval is not None:
-            char_start = extraction.char_interval.start_pos
-            char_end = extraction.char_interval.end_pos
-        else:
-            char_start = 0
-            char_end = len(extraction.extraction_text)
-        
-        attributes = extraction.attributes if extraction.attributes is not None else {}
-        
-        feature = ProductFeature(
-            feature_type=extraction.extraction_class,
-            feature_text=extraction.extraction_text,
-            attributes=attributes,
-            char_start=char_start,
-            char_end=char_end
-        )
-        response.features.append(feature)
-        
-        if extraction.extraction_class == "name":
-            response.name = extraction.extraction_text
-        elif extraction.extraction_class == "brand":
-            response.brand = extraction.extraction_text
-        elif extraction.extraction_class == "material":
-            response.materials.append(extraction.extraction_text)
-        elif extraction.extraction_class == "category":
-            response.category = extraction.extraction_text
-        elif extraction.extraction_class == "durability_indicator":
-            response.durability_indicators.append(extraction.extraction_text)
-        elif extraction.extraction_class == "allergen_warning":
-            response.allergen_warnings.append(extraction.extraction_text)
-        elif extraction.extraction_class == "potential_risk":
-            response.potential_risks.append(extraction.extraction_text)
-        elif extraction.extraction_class == "safety_information":
-            response.safety_information.append(extraction.extraction_text)
-        elif extraction.extraction_class == "manufacturing_detail":
-            response.manufacturing_details.append(extraction.extraction_text)
+    return await process_extraction_result(result, text)
 
-    return response
+async def read_file_async(file_path: str) -> str:
+    """Read file asynchronously"""
+    def _read_file():
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read()
+    
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(thread_pool, _read_file)
 
 @app.get("/extract-mock", response_model=ProductTextResponse)
 async def extract_product_features_mock():
     try:
-        with open("mock_api.json", "r", encoding="utf-8") as file:
-            file_content = file.read()
+        file_content = await read_file_async("mock_api.json")
         
         # Parse JSON to get structure but treat data content as raw text
         try:
@@ -251,10 +337,67 @@ async def extract_product_features(request: ProductTextRequest):
     except Exception as e:
         logger.error(f"Error extracting product features: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+@app.post("/extract-batch", response_model=BatchProductTextResponse)
+async def extract_product_features_batch(request: BatchProductTextRequest):
+    """Process multiple texts in parallel"""
+    try:
+        start_time = asyncio.get_event_loop().time()
+        
+        # Process all texts concurrently with semaphore to limit concurrency
+        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent extractions
+        
+        async def process_single_text(text: str) -> ProductTextResponse:
+            async with semaphore:
+                return await extract_product_features_common(text)
+        
+        tasks = [process_single_text(text) for text in request.texts]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Handle exceptions in results
+        successful_results = []
+        failed_count = 0
+        
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to process text {i}: {str(result)}")
+                failed_count += 1
+                # Add empty result for failed extractions
+                successful_results.append(ProductTextResponse())
+            else:
+                successful_results.append(result)
+        
+        end_time = asyncio.get_event_loop().time()
+        processing_time = end_time - start_time
+        
+        stats = {
+            "total_texts": len(request.texts),
+            "successful_extractions": len(request.texts) - failed_count,
+            "failed_extractions": failed_count,
+            "processing_time_seconds": round(processing_time, 2),
+            "average_time_per_text": round(processing_time / len(request.texts), 2) if request.texts else 0
+        }
+        
+        logger.info(f"Batch processed {len(request.texts)} texts in {processing_time:.2f}s")
+        
+        return BatchProductTextResponse(
+            results=successful_results,
+            processing_stats=stats
+        )
+
+    except Exception as e:
+        logger.error(f"Error in batch extraction: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch extraction failed: {str(e)}")
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup thread pool on shutdown"""
+    thread_pool.shutdown(wait=True)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8002, workers=4)

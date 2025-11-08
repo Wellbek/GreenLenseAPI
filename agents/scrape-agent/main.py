@@ -5,16 +5,22 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
-import requests
+import httpx
 from bs4 import BeautifulSoup, SoupStrainer
 import json
 from typing import List, Optional, Dict, Any
-from openai import AzureOpenAI
+from openai import AsyncAzureOpenAI
 import os
 from urllib.parse import urljoin, urlparse
 import re
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import uvicorn
 
 app = FastAPI(title="Scrape Agent", version="1.0.0")
+
+# Thread pool for CPU-bound operations
+thread_pool = ThreadPoolExecutor(max_workers=4)
 
 # Dataset of site-specific CSS classes to limit scraping scope for improved performance
 SITE_CLASS_FILTERS = {
@@ -32,7 +38,7 @@ class ProductInfo(BaseModel):
     raw_product_text: str = ""
 
 # Initialize Azure OpenAI client
-client = AzureOpenAI(
+client = AsyncAzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
@@ -48,30 +54,36 @@ def get_site_classes(url: str) -> Optional[List[str]]:
             return classes
     return None
 
-def get_webpage_content(url: str) -> BeautifulSoup:
+def _parse_html_content(content: bytes, url: str) -> BeautifulSoup:
+    """Parse HTML content in thread pool"""
+    site_classes = get_site_classes(url)
+    if site_classes:
+        strainer = SoupStrainer(class_=lambda x: x and any(cls in x.split() for cls in site_classes))
+        soup = BeautifulSoup(content, 'html.parser', parse_only=strainer)
+    else:
+        soup = BeautifulSoup(content, 'html.parser')
+    return soup
+
+async def get_webpage_content(url: str) -> BeautifulSoup:
     """Fetch webpage content and return BeautifulSoup object"""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=60)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=60.0) as client_http:
+            response = await client_http.get(url, headers=headers)
+            response.raise_for_status()
 
-        # Filter by site-specific classes during parsing if available
-        site_classes = get_site_classes(url)
-        if site_classes:
-            # Parse only elements with specified classes
-            strainer = SoupStrainer(class_=lambda x: x and any(cls in x.split() for cls in site_classes))
-            soup = BeautifulSoup(response.content, 'html.parser', parse_only=strainer)
-        else:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
+        # Parse HTML in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        soup = await loop.run_in_executor(thread_pool, _parse_html_content, response.content, url)
+        
         return soup
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch webpage: {str(e)}")
 
-def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
+async def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
     """Extract image URLs from filtered HTML sections"""
     images = []
     
@@ -79,7 +91,7 @@ def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
     html_content = str(soup)
     
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
             messages=[
                 {
@@ -115,7 +127,7 @@ def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
     if not images:
         # Use AI to identify product-relevant HTML sections first
         try:
-            section_response = client.chat.completions.create(
+            section_response = await client.chat.completions.create(
                 model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
                 messages=[
                     {
@@ -131,7 +143,7 @@ def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
                 max_tokens=1000
             )
             
-            content = response.choices[0].message.content.strip()
+            content = section_response.choices[0].message.content.strip()
             if content.startswith(''):
                 content = content[7:-3]
             elif content.startswith(''):
@@ -148,9 +160,8 @@ def extract_images_from_html(soup: BeautifulSoup, base_url: str) -> List[str]:
     
     return images
 
-def extract_product_content(soup: BeautifulSoup) -> str:
-    """Use AI to extract only current product content, excluding related items and irrelevant sections"""
-    
+def _extract_text_content(soup: BeautifulSoup) -> str:
+    """Extract text content in thread pool"""
     # Remove scripts, styles, and other non-content elements
     for element in soup.find_all(['script', 'style', 'noscript']):
         element.decompose()
@@ -160,9 +171,17 @@ def extract_product_content(soup: BeautifulSoup) -> str:
     
     # Clean up excessive whitespace
     page_text = re.sub(r'\s+', ' ', page_text).strip()
+    return page_text
+
+async def extract_product_content(soup: BeautifulSoup) -> str:
+    """Use AI to extract only current product content, excluding related items and irrelevant sections"""
+    
+    # Extract text in thread pool
+    loop = asyncio.get_event_loop()
+    page_text = await loop.run_in_executor(thread_pool, _extract_text_content, soup)
     
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
             messages=[
                 {
@@ -195,19 +214,23 @@ async def scrape_product(request: UrlRequest):
     url = str(request.url)
 
     # Get webpage content (automatically filtered by site classes if applicable)
-    soup = get_webpage_content(url)
+    soup = await get_webpage_content(url)
     
-    # Extract images using AI
-    images = extract_images_from_html(soup, url)
+    # Extract images and content concurrently
+    images_task = extract_images_from_html(soup, url)
+    content_task = extract_product_content(soup)
     
-    # Extract product content using AI
-    raw_product_text = extract_product_content(soup)
+    images, raw_product_text = await asyncio.gather(images_task, content_task)
     
     return ProductInfo(
         images=images,
         raw_product_text=raw_product_text
     )
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup thread pool on shutdown"""
+    thread_pool.shutdown(wait=True)
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8004)
+    uvicorn.run(app, host="0.0.0.0", port=8004, workers=4, loop="asyncio")
