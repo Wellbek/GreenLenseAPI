@@ -68,7 +68,7 @@ Pass data to LLM Reasoning Engine for scoring.
 
 # Architecture
 
-![alt text](image.png)
+<img width="912" height="582" alt="Screenshot 2025-10-27 at 5 14 23 PM" src="https://github.com/user-attachments/assets/34d5070b-c1da-4ca5-af73-667397c50834" />
 
 ## Microservices
 
@@ -148,9 +148,9 @@ Docker & Docker Compose
 Redis
 
 ## Setup
-git clone https://github.com/your-org/greenlense-api.git
-cd greenlense-api
-docker-compose up --build
+git clone [https://github.com/your-org/greenlense-api.git](https://github.com/Wellbek/GreenLenseAPI.git) <br/>
+cd greenlense-api <br/>
+docker-compose up --build <br/>
 
 ## Environment Variables
 Create a .env file in the root directory with the following variables:
