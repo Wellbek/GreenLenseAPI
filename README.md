@@ -68,7 +68,8 @@ Pass data to LLM Reasoning Engine for scoring.
 
 # Architecture
 
-<img width="912" height="582" alt="Screenshot 2025-10-27 at 5 14 23 PM" src="https://github.com/user-attachments/assets/34d5070b-c1da-4ca5-af73-667397c50834" />
+<img width="767" height="498" alt="Screenshot 2025-11-09 at 10 19 56 AM" src="https://github.com/user-attachments/assets/c1a54625-4d0d-4fed-b545-929a8cc85d44" />
+
 
 ## Microservices
 
