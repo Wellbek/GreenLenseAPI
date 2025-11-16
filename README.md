@@ -1,101 +1,128 @@
-# GreenLense Agentic AI
-## Overview
-The Greenlense API evaluates a product’s eco-friendliness, ethical sourcing, and social impact based on product data. It returns a Green Score along with an optional sustainability report for transparency.<br/>
-This API is designed to power:<br/>
+# GreenLense Agentic AI API
 
-Browser Extensions – Highlight sustainability scores while browsing platforms like Coupang.<br/>
-E-commerce Integrations – Partners query the API directly for product scoring.<br/>
-Standalone Apps – Enable sustainability search, comparison, and insights.<br/>
+## Product Insight Intelligence API
 
-# Core Concept
-The challenge is to estimate a traceable sustainability score (eco, ethical, social) from minimal or unstructured data by enriching it with additional context about:
+GreenLense is an agentic product-insight system that generates comprehensive evaluations of consumer products across multiple dimensions: quality, durability, sustainability, materials, certifications, brand reputation, public sentiment, and more.
 
-Brand: Reputation, certifications, controversies.<br/>
-Product Category & Materials.<br/>
-Implicit Semantics: Extracted from descriptions and images.<br/>
+The system uses a coordinated orchestra of specialized research agents to transform minimal product data into a thorough comparative insight report. This enables:
 
-# Solution: Multi-Layer Scoring
-## Text Layer
+* Instant product comparison and ranking
+* Reduced uncertainty and increased purchase confidence
+* Better customer experience through clarity and transparency
+* Improved product matching between user needs and product attributes
+* Higher conversions with fewer returns
 
-### Keyword Extractor: 
-Extract brand, materials, category.<br/>
-### Image Analyzer:
-OCR for text.<br/>
-Logo detection.<br/>
-Image context description.<br/>
+GreenLense was originally designed as a sustainability-scoring API, but has evolved into a full multi-dimensional product-intelligence platform after identifying a larger market.
 
+## Core Concept
 
-### Feature Combiner: 
-Merge text and image features.<br/>
+The goal is to compute reliable and traceable product insights from minimal or unstructured data by enriching input with external research and contextual signals.
 
-## Research Layer
+GreenLense aims to extract and analyze:
 
-### Brand Research Agent:
-Live web search.<br/>
-Wikipedia summaries.<br/>
-Sustainability reports.<br/>
+* Brand reputation and corporate track record
+* Materials and product construction
+* Durability and long-term quality indicators
+* Certifications, compliance, and safety data
+* Sustainability and ethical considerations
+* Public sentiment and historical reliability
+* Category-specific reference knowledge
 
-### Certification Lookup Agent:
-Extract certifications from metadata.<br/>
-Query certification databases.<br/>
+All extracted and researched signals are consolidated into a unified evaluation.
 
-### Footprint Agent:
-Estimate environmental footprint.<br/>
+## System Overview
 
-### Public Sentiment Agent:
-Fetch recent mentions to assess reputation.<br/>
+GreenLense operates through a multi-layered pipeline composed of extraction, research, and reasoning stages.
 
-## Reasoning & Scoring Layer
-Aggregate all results into a structured context object.<br/>
-Pass data to LLM Reasoning Engine for scoring.<br/>
+### 1. Extraction Layer
 
-## Example Output
+**Text Agent**
 
-{
-  "product": "Nike Air Zoom Pegasus 40 Running Shoes",
-  "eco_score": 3.2,
-  "ethical_score": 2.8,
-  "reputation_score": 3.9,
-  "sources": [
-    "Nike Official Website",
-    "XYZ API",
-    "XYZ Index",
-    "XYZ Database",
-    "Product Image (Packaging Text)"
-  ],
-  "explanation": "The Nike Air Zoom Pegasus 40 uses at least 20% recycled content by weight and features partially recycled mesh. However, the brand has faced criticism for limited supply-chain transparency and past labor-related issues in Southeast Asia. Public reputation remains moderate due to strong sustainability marketing and global brand trust."
-}
+* Brand extraction
+* Material and component identification
+* Product category inference
+* Semantic signal extraction from descriptions
+
+**Image Agent**
+
+* OCR from packaging or product images
+* Logo detection
+* Visual material indicators
+* Additional contextual cues
+
+A unified feature combiner merges all extracted text and image information.
+
+### 2. Research Layer (Agent Orchestra)
+
+This layer enriches the product data through multiple specialized agents. For example:
+
+* **Brand Research Agent**
+  Corporate reputation, controversies, trust indexes, sustainability reports
+
+* **Certification Agent**
+  Identification and validation of certifications from text, metadata, or images
+
+* **Durability & Quality Agent**
+  Category benchmarks, common failure modes, long-term reliability indicators
+
+* **Footprint & Sustainability Agent**
+  Material and supply-chain environmental impact estimation
+
+* **Sentiment Agent**
+  Public sentiment, common complaints, long-term satisfaction indicators
+
+* **Allergen / Material Risk Agent**
+  Safety, allergen exposure, and hazardous material detection
+
+These agents operate independently and in parallel.
+
+### 3. Reasoning & Aggregation Layer
+
+The orchestrator compiles all extracted and researched data into a structured context object.
+A reasoning agent (LLM-based) generates:
+
+* Quality score
+* Durability score
+* Sustainability score
+* Ethical score
+* Reputation score
+* Key insights
+* Risk flags
+* Full narrative explanation
+* Source list
 
 # Architecture
 
-<img width="767" height="498" alt="Screenshot 2025-11-09 at 10 19 56 AM" src="https://github.com/user-attachments/assets/c1a54625-4d0d-4fed-b545-929a8cc85d44" />
+<img width="1001" height="664" alt="image" src="https://github.com/user-attachments/assets/6190a08d-b846-4862-b968-e3131001a0fa" />
 
+### Microservices
 
-## Microservices
+* Each agent is an independent microservice
+* Multi-worker configurations for parallelism
+* Asynchronous orchestrator for high-concurrency I/O
+* Plan for redis caching for frequently accessed research data
 
-Each agent runs as an independent service for scalability and fault isolation.<br/>
-Multiple workers per service for process-level parallelism.<br/>
-Async/Await for high concurrency during I/O operations.<br/>
+### Execution Flow
 
-## Execution Flow
+1. Request sent to API Gateway (port 8000)
+2. Gateway forwards to Orchestrator (port 8002)
+3. Orchestrator invokes all agents in parallel
+4. Responses are aggregated and passed to the Reasoning Agent
+5. Final structured insight report is returned
 
-User sends request to API Gateway (port 8000).<br/>
-Gateway forwards to Orchestrator (port 8002).<br/>
-Orchestrator calls agents in parallel.<br/>
-Aggregates responses → LLM Reasoning Engine → Returns final scores.<br/>
+# Tech Stack
 
-## Tech Stack
+* FastAPI for all internal and external service endpoints
+* Redis for caching
+* Azure Vision for image processing
+* Azure OpenAI for reasoning and structured scoring
+* Docker + Docker Compose for containerized microservices
+* LangExtract for advanced text parsing
 
-FastAPI for API endpoints.<br/>
-Redis for caching frequently accessed data.<br/>
-Azure for deployment.<br/>
-LangExtract for text extraction.<br/>
-Azure Vision for image analysis.<br/>
-Docker for containerization.<br/>
+# File Structure
 
-
-## File Structure
-```Greenlense-api/
+```
+Greenlense-api/
 ├── docker-compose.yml
 ├── .env
 ├── requirements.txt
@@ -115,22 +142,13 @@ Docker for containerization.<br/>
 │   ├── image-agent/
 │   │   ├── Dockerfile
 │   │   └── main.py
-│   ├── allegen-agent/
+│   ├── allergen-agent/
 │   │   ├── Dockerfile
 │   │   └── main.py
-│   ├── brand-agent/
+│   ├── scrape-agent/
 │   │   ├── Dockerfile
 │   │   └── main.py
-│   ├── cert-agent/
-│   │   ├── Dockerfile
-│   │   └── main.py
-│   ├── footprint-agent/
-│   │   ├── Dockerfile
-│   │   └── main.py
-│   ├── sentiment-agent/
-│   │   ├── Dockerfile
-│   │   └── main.py
-│   └── reasoning-agent/
+│   └── orchestrator/
 │       ├── Dockerfile
 │       └── main.py
 │
@@ -141,23 +159,33 @@ Docker for containerization.<br/>
     ├── [data files]
     └── redis.conf
 ```
+
+---
+
 # Getting Started
+
 ## Prerequisites
 
-Python 3.10+<br/>
-Docker & Docker Compose<br/>
-Redis<br/>
+* Python 3.10+
+* Docker & Docker Compose
+* Redis
 
 ## Setup
-git clone [https://github.com/your-org/greenlense-api.git](https://github.com/Wellbek/GreenLenseAPI.git) <br/>
-cd greenlense-api <br/>
-docker-compose up --build <br/>
+
+```bash
+git clone https://github.com/Wellbek/GreenLenseAPI.git
+cd greenlense-api
+docker-compose up --build
+```
 
 ## Environment Variables
-Create a .env file in the root directory with the following variables:<br/>
 
-`AZURE_OPENAI_API_KEY=your_azure_openai_api_key`<br/>
-`AZURE_OPENAI_ENDPOINT=https://your-azure-openai-endpoint/`<br/>
-`AZURE_OPENAI_API_VERSION=your_api_version`<br/>
-``AZURE_OPENAI_DEPLOYMENT_NAME=your_deployment_name``<br/>
-`VISION_KEY=your_azure_vision_key`<br/>
+Create a `.env` file:
+
+```
+AZURE_OPENAI_API_KEY=
+AZURE_OPENAI_ENDPOINT=
+AZURE_OPENAI_API_VERSION=
+AZURE_OPENAI_DEPLOYMENT_NAME=
+VISION_KEY=
+```
