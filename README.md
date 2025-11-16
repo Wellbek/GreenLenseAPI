@@ -131,10 +131,6 @@ Greenlense-api/
 │   ├── Dockerfile
 │   └── main.py
 │
-├── orchestrator/
-│   ├── Dockerfile
-│   └── main.py
-│
 ├── agents/
 │   ├── text-agent/
 │   │   ├── Dockerfile
